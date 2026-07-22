@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=None, help="path to config.yaml")
     args = parser.parse_args(argv)
 
-    config = load_config(args.config) if args.config else load_config()
+    config = load_config(args.config)
     path = write_snapshot(config, args.week, args.scenario, args.magnitude, args.rows)
     frame = load_snapshot(config, args.week, args.scenario)
 

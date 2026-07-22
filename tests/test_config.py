@@ -16,7 +16,7 @@ def write_config(tmp_path: Path, mutate) -> Path:
     raw = yaml.safe_load(config_module.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
     mutate(raw)
     configs_dir = tmp_path / "configs"
-    configs_dir.mkdir(exist_ok=True)
+    configs_dir.mkdir(parents=True, exist_ok=True)
     path = configs_dir / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     return path
@@ -80,3 +80,23 @@ def test_environment_overrides_the_configured_tracking_uri(tmp_path: Path, monke
     config = load(write_config(tmp_path, lambda raw: None))
 
     assert config.mlflow.resolve_tracking_uri() == "http://localhost:5000"
+
+
+def test_the_config_path_follows_the_deployment_not_the_package(tmp_path: Path, monkeypatch):
+    """Regression guard, learned the hard way from a container.
+
+    ``PACKAGE_ROOT`` is derived from the module's own location, so in an installed package
+    it points inside site-packages and the shipped config is nowhere near it. The working
+    directory and an environment variable both have to win over that.
+    """
+    written = write_config(tmp_path, lambda raw: None)
+    monkeypatch.delenv(config_module.CONFIG_PATH_VARIABLE, raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    assert config_module.default_config_path() == written
+    assert load().root == tmp_path
+
+    elsewhere = write_config(tmp_path / "other", lambda raw: None)
+    monkeypatch.setenv(config_module.CONFIG_PATH_VARIABLE, str(elsewhere))
+
+    assert config_module.default_config_path() == elsewhere

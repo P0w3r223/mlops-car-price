@@ -21,6 +21,7 @@ import yaml
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PACKAGE_ROOT / "configs" / "config.yaml"
+CONFIG_PATH_VARIABLE = "MLOPS_CAR_PRICE_CONFIG"
 
 MANIFEST_FILENAME = "manifest.json"
 _PROPORTION_TOLERANCE = 1e-9
@@ -216,13 +217,32 @@ def _resolve(root: Path, value: Any, name: str) -> Path:
     return path if path.is_absolute() else (root / path)
 
 
-def load(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
+def default_config_path() -> Path:
+    """Where to look for the config when the caller does not say.
+
+    Environment variable first, then the working directory, then the source tree. The order
+    exists because ``PACKAGE_ROOT`` is derived from this file's location, so in an installed
+    package it points inside ``site-packages`` — the exact trap ADR 0001 documents for the
+    modelling layer, which this package walked into the first time it ran from a container.
+    Configuration belongs to the deployment, not to the code.
+    """
+    from_env = os.environ.get(CONFIG_PATH_VARIABLE)
+    if from_env:
+        return Path(from_env)
+    from_working_directory = Path.cwd() / "configs" / "config.yaml"
+    if from_working_directory.exists():
+        return from_working_directory
+    return DEFAULT_CONFIG_PATH
+
+
+def load(path: Path | str | None = None) -> Config:
     """Read, validate and resolve the config file.
 
     Args:
-        path: Config file to read. Its parent's parent becomes the root for relative paths.
+        path: Config file to read; defaults to :func:`default_config_path`. Its parent's
+            parent becomes the root for relative paths.
     """
-    config_path = Path(path).resolve()
+    config_path = Path(path if path is not None else default_config_path()).resolve()
     if not config_path.exists():
         raise ConfigError(f"no config file at {config_path}")
     root = config_path.parent.parent

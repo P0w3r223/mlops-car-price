@@ -195,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    config = load_config(args.config) if args.config else load_config()
+    config = load_config(args.config)
     result = train_run(
         config,
         model_name=args.model,
