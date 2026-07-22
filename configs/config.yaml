@@ -1,0 +1,54 @@
+# Every knob of the system lives here — no thresholds or proportions in the code.
+# Relative paths are resolved against the repository root (this file's parent's parent).
+
+seed: 42
+
+paths:
+  raw_csv: data/raw/Car_Prices_Poland_Kaggle.csv
+  processed_dir: data/processed
+  models_dir: models
+
+# Three-way split of the source dataset. `holdout_eval` is frozen for the life of the
+# project: every champion/challenger comparison is decided on these exact rows, so the
+# comparison measures the models and not the sampling. `stream_pool` is never trained on
+# — it is the reserve that the replay generator turns into weekly "production" snapshots.
+splits:
+  train_initial: 0.6
+  holdout_eval: 0.2
+  stream_pool: 0.2
+
+mlflow:
+  experiment: mlops-car-price
+  # The model registry does not work on a file store, so the backend is SQLite.
+  backend_store: mlflow.db
+  # Set to an explicit URI (e.g. http://localhost:5000) to use a tracking server
+  # instead of the local SQLite file. MLFLOW_TRACKING_URI overrides both.
+  tracking_uri: null
+
+training:
+  # LightGBM by default, not the offline winner: a RandomForest artifact of this dataset
+  # is ~563 MB, which a weekly retraining loop and a model registry cannot carry.
+  # The trade-off is measured, not assumed — see docs/decisions/.
+  default_model: LightGBM
+  # Rows sampled from train_initial; null means "train on everything". CI sets a small
+  # number so a workflow run stays minutes, not hours.
+  sample_rows: null
+
+# Consumed from session 3 onward (drift monitoring).
+drift:
+  # Gates run on effect size, not on p-values: at 100k rows a KS test rejects for shifts
+  # far too small to matter. The KS p-value is reported as a diagnostic only.
+  psi_threshold: 0.2
+  wasserstein_threshold: 0.1
+  ks_p_value_threshold: 0.01
+  min_snapshot_rows: 500
+
+# Consumed from session 5 onward (champion/challenger promotion).
+promotion:
+  # A challenger is promoted only if the paired bootstrap CI of the MAE difference
+  # excludes zero AND the point improvement clears this margin AND the holdout is large
+  # enough for the comparison to mean anything.
+  min_mae_improvement_pln: 100.0
+  alpha: 0.05
+  bootstrap_resamples: 10000
+  min_holdout_rows: 5000
