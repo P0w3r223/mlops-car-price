@@ -22,6 +22,7 @@ src/mlops_car_price/
   replay.py                  # weekly "production" snapshots + named drift scenarios
   drift/metrics.py           # PSI, Wasserstein, KS, chi-square, missing rates
   drift/detector.py          # thresholds + calibration -> a verdict with reasons
+  drift/evaluate.py          # false alarms and power for three competing detectors
   drift/report.py            # the verdict as markdown
   training/train.py          # the only way a model gets trained; one run = one record
   training/promote.py        # the gate: score, judge, move the alias, record why
@@ -53,6 +54,7 @@ python -m mlops_car_price.training.promote --version 1 [--dry-run]
 python -m mlops_car_price.replay --week 1 --scenario price_shock
 python -m mlops_car_price.drift.detector --week 1 --scenario price_shock
 python examples/drift_scenarios.py                 # regenerate the scenario table
+python examples/detector_evaluation.py             # false alarms + power (~25 min)
 python examples/artifact_cost.py                   # regenerate the cost table
 mlflow ui --backend-store-uri sqlite:///mlflow.db  # inspect runs and versions
 pytest                                             # full suite
@@ -81,6 +83,10 @@ ruff check .                                       # lint
   for training would make drift detection self-fulfilling.
 - **Drift gates run on effect size, not p-values.** At these sample sizes a KS test rejects
   for shifts far too small to matter; the p-value is a diagnostic, PSI and Wasserstein decide.
+- **A monitor is a classifier; measure both its error rates.** Any change to the detector
+  or its thresholds means rerunning `examples/detector_evaluation.py` - a rule nobody
+  measured is a rule nobody can defend. Fixed thresholds alarm on 100% of unshifted weeks
+  below 1 000 rows; the calibrated detector on 0-7.5% at the same sizes with identical power.
 - **A threshold has to beat the noise floor too.** PSI's null distribution depends on sample
   size and category count, so a column is flagged only when it clears both the configured
   threshold and what it scores against itself at that sample size (ADR 0006). Never silence
