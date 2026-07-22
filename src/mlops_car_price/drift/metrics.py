@@ -197,16 +197,81 @@ def noise_floor(
 
     rng = np.random.default_rng(seed)
     psis, shifts = np.empty(resamples), np.empty(resamples)
-    for index in range(resamples):
-        drawn = values.iloc[rng.integers(0, len(values), n_current)]
-        drift = (
-            numeric_drift(reference.name or "x", values, drawn, bins)
-            if kind == "numeric"
-            else categorical_drift(reference.name or "x", values, drawn)
+
+    # Only PSI and the distance are needed here, and everything that does not depend on the
+    # draw (bin edges, reference shares, spread, category order) is computed once. The KS
+    # and chi-square tests are skipped entirely: nothing gates on them, and they dominate
+    # the cost of a null loop run hundreds of times per column.
+    if kind == "numeric":
+        reference_values = values.to_numpy(dtype=float)
+        edges = numeric_bins(reference_values, bins)
+        reference_shares = _shares(
+            np.histogram(reference_values, bins=edges)[0], len(reference_values)
         )
-        psis[index], shifts[index] = drift.psi, drift.normalised_shift
+        spread = float(np.std(reference_values))
+        for index in range(resamples):
+            drawn = reference_values[rng.integers(0, len(reference_values), n_current)]
+            current_shares = _shares(np.histogram(drawn, bins=edges)[0], n_current)
+            psis[index] = population_stability_index(reference_shares, current_shares)
+            distance = float(stats.wasserstein_distance(reference_values, drawn))
+            shifts[index] = distance / spread if spread > 0 else 0.0
+    else:
+        codes, categories = pd.factorize(values.astype(str))
+        reference_counts = np.bincount(codes, minlength=len(categories))
+        reference_shares = _shares(reference_counts, len(codes))
+        for index in range(resamples):
+            drawn = codes[rng.integers(0, len(codes), n_current)]
+            current_shares = _shares(
+                np.bincount(drawn, minlength=len(categories)), n_current
+            )
+            psis[index] = population_stability_index(reference_shares, current_shares)
+            shifts[index] = float(np.abs(current_shares - reference_shares).sum() / 2)
 
     return float(np.quantile(psis, quantile)), float(np.quantile(shifts, quantile))
+
+
+def per_column_quantile(report_quantile: float, n_columns: int) -> float:
+    """Split a report-level confidence across the columns that could each raise the alarm.
+
+    A report fires if *any* column fires, so calibrating every column at the 99th percentile
+    of its own null gives roughly seven chances to be wrong, not one. The tail is therefore
+    divided across the columns (a Bonferroni split): conservative, because the columns are
+    correlated, and simple enough to state out loud.
+    """
+    if n_columns <= 0:
+        return report_quantile
+    return 1.0 - (1.0 - report_quantile) / n_columns
+
+
+def noise_floors(
+    reference: pd.DataFrame,
+    n_current: int,
+    numeric_features: tuple[str, ...],
+    categorical_features: tuple[str, ...],
+    resamples: int,
+    quantile: float,
+    seed: int,
+    bins: int = DEFAULT_BINS,
+) -> dict[str, tuple[float, float]]:
+    """Noise floors for every column at one sample size.
+
+    ``quantile`` is the confidence for the **report**; each column is calibrated at the
+    tighter quantile that follows from it. Split out from ``compare`` because a floor
+    depends only on the reference column and the snapshot size — never on the snapshot
+    itself — so the evaluation harness computes them once and reuses them across thousands
+    of trials.
+    """
+    columns = (
+        *((column, "numeric") for column in numeric_features),
+        *((column, "categorical") for column in categorical_features),
+    )
+    column_quantile = per_column_quantile(quantile, len(columns))
+    return {
+        column: noise_floor(
+            reference[column], n_current, kind, resamples, column_quantile, seed, bins
+        )
+        for column, kind in columns
+    }
 
 
 def compare(
@@ -218,11 +283,14 @@ def compare(
     calibration_resamples: int = 0,
     calibration_quantile: float = 0.99,
     seed: int = 0,
+    floors: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[FeatureDrift, ...]:
     """Run the per-column comparison over every feature the model actually consumes.
 
-    With ``calibration_resamples > 0`` each column also carries the noise floor measured
-    for its own distribution at this sample size.
+    Args:
+        floors: Precomputed noise floors keyed by column. When given, they are used as they
+            are and ``calibration_resamples`` is ignored — the caller has already paid for
+            the measurement.
     """
     missing = [
         column
@@ -242,13 +310,19 @@ def compare(
             if kind == "numeric"
             else categorical_drift(column, reference[column], current[column])
         )
-        if calibration_resamples > 0:
+        if floors is not None:
+            if column in floors:
+                psi_floor, shift_floor = floors[column]
+                drift = replace(drift, psi_noise_floor=psi_floor, shift_noise_floor=shift_floor)
+        elif calibration_resamples > 0:
             psi_floor, shift_floor = noise_floor(
                 reference[column],
                 len(current),
                 kind,
                 calibration_resamples,
-                calibration_quantile,
+                per_column_quantile(
+                    calibration_quantile, len(numeric_features) + len(categorical_features)
+                ),
                 seed,
                 bins,
             )

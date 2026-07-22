@@ -56,6 +56,35 @@ exceeds **both**:
 measurement; setting resamples to 0 restores the fixed-threshold behaviour, which is what
 session 4 will measure this against.
 
+## Measured outcome
+
+The decision was made from a single failing control snapshot; it was then measured properly
+over 200 snapshots per cell (`examples/detector_evaluation.py`, full tables in
+`reports/detector_evaluation.md`).
+
+False alarms on unshifted weeks:
+
+| Rows | fixed | calibrated | KS p-value |
+|---|---:|---:|---:|
+| 250 | 100.0% | 5.0% | 13.5% |
+| 1 000 | 99.0% | 0.0% | 20.0% |
+| 5 000 | 0.0% | 0.0% | 42.5% |
+
+Two things the numbers changed about the original reasoning:
+
+1. **The failure is worse than "occasionally noisy".** Below a thousand rows the fixed
+   threshold alarms on *every* unshifted week. Above two thousand it alarms on none. A rule
+   whose behaviour flips from always to never as traffic volume changes is not a threshold,
+   it is an accident.
+2. **Per-column calibration was not enough.** A report fires if any of seven columns fires,
+   so calibrating each at the 99th percentile gave seven chances to be wrong: measured at
+   10–25% before the tail was split across columns, 0–7.5% after. The split (Bonferroni,
+   conservative because the columns correlate) and 200 resamples to estimate a tail that far
+   out are what the config now carries.
+
+Power was unaffected: at every magnitude of every scenario the calibrated detector matched
+the fixed one exactly. Calibration removed the false alarms without costing detections.
+
 ## Consequences
 
 - **The control case is quiet**, which is the property that makes an alarm worth reading.
