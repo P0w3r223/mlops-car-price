@@ -17,6 +17,9 @@ dependencies = [
     "pandas>=2.2,<3",
     "numpy>=1.26,<3",
     "pyarrow>=16,<21",
+    # Statistical primitives for the drift metrics (KS, Wasserstein, chi-square). The
+    # decision logic and PSI are implemented here; well-tested numerics are not rewritten.
+    "scipy>=1.11,<2",
     "pyyaml>=6,<7",
 ]
 
@@ -24,6 +27,11 @@ dependencies = [
 dev = [
     "pytest>=8.3,<9",
     "ruff>=0.6,<1",
+]
+# Not a runtime or CI dependency: Evidently exists here only to referee the drift metrics
+# when they change (see ADR 0005 and tests/test_drift_oracle.py).
+oracle = [
+    "evidently>=0.7,<0.8",
 ]
 
 [tool.setuptools.packages.find]

@@ -8,9 +8,9 @@ around the used-car price model from
 training runs, drift monitoring on simulated production traffic, and a promotion rule
 that decides — on evidence — when a challenger may replace the champion.
 
-> **Status: session 2 of 6.** Data versioning, MLflow tracking, the model registry and the
-> promotion gate are in place. Drift monitoring, the retraining loop and the versioned API
-> land in the sessions that follow; the roadmap is in the issues.
+> **Status: session 3 of 6.** Data versioning, MLflow tracking, the model registry, the
+> promotion gate and drift monitoring are in place. The retraining loop and the versioned
+> API land in the sessions that follow; the roadmap is in the issues.
 
 ## The problem
 
@@ -32,9 +32,13 @@ src/mlops_car_price/
   dataset.py               three-way split + content manifest (the data version)
   tracking.py              MLflow wiring: tracking URI, experiment, client
   registry.py              versions and the champion/challenger aliases
+  replay.py                weekly "production" snapshots + named drift scenarios
+  drift/metrics.py         PSI, Wasserstein, KS, chi-square, missing rates
+  drift/detector.py        thresholds and calibration -> a verdict with reasons
+  drift/report.py          the verdict as markdown
   training/train.py        the only path to a trained model; one run = one record
   training/promote.py      the gate: score, judge, move the alias, record why
-examples/artifact_cost.py  regenerates the operational cost table below
+examples/                  scripts that regenerate the tables below
 ```
 
 The modelling code is not reimplemented here. `car_price_ml` is installed as a dependency
@@ -78,6 +82,55 @@ is enforced by the gate, not by a paragraph — the real candidate was refused:
 [promote] REJECTED - candidate v2, delta +369.8 PLN
 ```
 
+## Watching the model age
+
+Fresh listings cannot be collected legally (ADR 0002), so a week of "production traffic" is
+a draw from `stream_pool` — never trained on, never evaluated on — optionally put through a
+named scenario. Three monitors then watch the same week, and they disagree on purpose
+(regenerate with `python examples/drift_scenarios.py`):
+
+| Scenario | What breaks | Feature drift | Prediction drift | MAE change | Alert |
+|---|---|---|---|---:|---|
+| `stable` | no change; the control case | - | no | -0.9% | no |
+| `price_shock` | prices inflate, features unchanged | - | no | **+135.2%** | **yes** |
+| `fuel_mix_shift` | more electric and hybrid cars | age, mileage, vol_engine, model, fuel | yes | +2.1% | **yes** |
+| `mileage_shift` | higher mileage across the week | mileage | no | +24.5% | **yes** |
+| `unseen_makes` | makes absent from the training data | mark | no | +7.5% | **yes** |
+| `missing_engine_volume` | engine volume arrives empty | vol_engine | no | +26.1% | **yes** |
+
+Two rows carry the argument for paying for all three monitors:
+
+- **`price_shock`** moves the target and nothing else. Every feature is untouched, so feature
+  drift is silent; the inputs are unchanged, so the predictions are identical and prediction
+  drift is silent too. Only the realised error sees it — **+135%** — and in a real system that
+  signal arrives last, because labels are late.
+- **`fuel_mix_shift`** is the mirror image: five features flagged, predictions flagged, and the
+  model is **2.1% worse**. Drift is not degradation. A monitor that only knows how to say
+  "the data moved" will page someone for this.
+
+## Why the textbook PSI threshold does not work
+
+The first monitoring run flagged drift on the **control snapshot** — a week with nothing
+changed. The culprit is the received wisdom that PSI above 0.2 means drift:
+
+| Feature | Categories | PSI on an unshifted week | PSI from noise alone (99th pct) |
+|---|---:|---:|---:|
+| age | numeric | 0.002 | 0.009 |
+| fuel | 6 | 0.000 | 0.006 |
+| mark | ~30 | 0.013 | 0.017 |
+| **model** | **~200** | **0.140** | **0.169** |
+
+PSI is an effect size, but its null distribution still depends on sample size and category
+count. For `age` the 0.2 threshold sits 22× above the noise; for `model` the noise alone eats
+0.169 of it. Shrink the sample and it breaks outright: 200 categories drawn at 500 rows score
+**PSI 0.36 against their own source**.
+
+So a column is flagged only when it clears **both** the configured threshold ("is this worth
+acting on?") and its own measured noise floor ("is this more than the column does by itself?"),
+where the floor comes from resampling the reference at the snapshot's size
+([ADR 0006](docs/decisions/0006-calibrated-drift-thresholds.md)). p-values are reported for
+every column and gate nothing — at these sample sizes they measure n, not drift.
+
 ## The bug this project found in its own foundation
 
 Two runs of the same model, same seed, same rows, kept disagreeing:
@@ -102,6 +155,8 @@ what a data version should do when the code that cleans the data changes.
 ```bash
 python -m mlops_car_price.training.train --model LightGBM --register  # -> version, alias challenger
 python -m mlops_car_price.training.promote --version 1                # -> judged, alias moved
+python -m mlops_car_price.replay --week 1 --scenario price_shock      # -> a week of traffic
+python -m mlops_car_price.drift.detector --week 1 --scenario price_shock
 ```
 
 Registering is proposing, not deploying. The gate scores the candidate **and** the current
@@ -143,6 +198,13 @@ Full context in [`docs/decisions/`](docs/decisions/).
 - **[ADR 0004](docs/decisions/0004-reproducibility-fixed-upstream.md) — the determinism bug
   was fixed in A3, not patched around here.** Duplicating the preprocessing would have
   defeated the point of consuming it as a package.
+- **[ADR 0005](docs/decisions/0005-own-drift-metrics-evidently-as-oracle.md) — the drift
+  metrics are implemented here; Evidently referees them offline.** It costs 41 transitive
+  packages and a 6-second import to render HTML this project renders as markdown — but it
+  agrees with our numbers to five decimals, and that agreement is a test.
+- **[ADR 0006](docs/decisions/0006-calibrated-drift-thresholds.md) — thresholds are
+  calibrated against the null.** A fixed PSI cutoff alarms on unshifted data whenever a
+  column has many categories or the sample is small.
 - **SQLite, not a file store, for MLflow.** The model registry does not exist on a file
   backend — a constraint that only surfaces at `register_model` time.
 - **Drift gates on effect size, not p-values.** At 100k rows a KS test rejects for shifts
