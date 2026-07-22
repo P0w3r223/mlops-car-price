@@ -8,9 +8,9 @@ around the used-car price model from
 training runs, drift monitoring on simulated production traffic, and a promotion rule
 that decides — on evidence — when a challenger may replace the champion.
 
-> **Status: session 3 of 6.** Data versioning, MLflow tracking, the model registry, the
-> promotion gate and drift monitoring are in place. The retraining loop and the versioned
-> API land in the sessions that follow; the roadmap is in the issues.
+> **Status: session 4 of 6.** Data versioning, MLflow tracking, the model registry, the
+> promotion gate, drift monitoring and the detector evaluation are in place. The retraining
+> loop and the versioned API land next; the roadmap is in the issues.
 
 ## The problem
 
@@ -35,6 +35,7 @@ src/mlops_car_price/
   replay.py                weekly "production" snapshots + named drift scenarios
   drift/metrics.py         PSI, Wasserstein, KS, chi-square, missing rates
   drift/detector.py        thresholds and calibration -> a verdict with reasons
+  drift/evaluate.py        false alarms and power, three detectors on identical data
   drift/report.py          the verdict as markdown
   training/train.py        the only path to a trained model; one run = one record
   training/promote.py      the gate: score, judge, move the alias, record why
@@ -107,6 +108,44 @@ Two rows carry the argument for paying for all three monitors:
 - **`fuel_mix_shift`** is the mirror image: five features flagged, predictions flagged, and the
   model is **2.1% worse**. Drift is not degradation. A monitor that only knows how to say
   "the data moved" will page someone for this.
+
+## The detector is measured, not trusted
+
+A monitor is a classifier with two error rates, and shipping one without measuring them is
+how alerting turns into noise. Three detectors are run on identical snapshots — the textbook
+fixed thresholds, the calibrated version this project uses, and a KS p-value gate as the arm
+to beat (`python examples/detector_evaluation.py`, 200 snapshots per cell):
+
+**False alarms on weeks where nothing happened.** Every figure here is an error.
+
+| Rows in snapshot | fixed thresholds | calibrated (this project) | KS p-value |
+|---|---:|---:|---:|
+| 250 | 100.0% | 5.0% | 13.5% |
+| 500 | 100.0% | 7.5% | 17.5% |
+| 1 000 | 99.0% | **0.0%** | 20.0% |
+| 2 000 | 0.0% | **0.0%** | 13.5% |
+| 5 000 | 0.0% | **0.0%** | 42.5% |
+
+**The same negligible shift at growing sample sizes** — `mileage_shift` of 0.05 standard
+deviations, a change nobody would retrain for. The shift never changes; only `n` does.
+
+| Rows in snapshot | fixed thresholds | calibrated (this project) | KS p-value |
+|---|---:|---:|---:|
+| 250 | 100.0% | 11.0% | 16.5% |
+| 500 | 100.0% | 17.0% | **100.0%** |
+| 1 000 | 99.5% | 13.0% | **100.0%** |
+| 2 000 | 1.5% | 1.5% | **100.0%** |
+| 5 000 | 0.0% | 0.0% | **100.0%** |
+
+That is the p-value trap with a number on it: from 500 rows upward the significance test is
+*certain* about a shift too small to act on, and it grows more certain as the data grows.
+The effect-size detectors move the other way — with more rows the estimate settles below the
+threshold, which is the correct answer.
+
+And calibration is not paid for in power: across every magnitude of every scenario the
+calibrated detector matched the fixed one exactly (0.05σ mileage: 4% both; 0.1σ: 100% both;
+2% unseen makes: 3% both; 5%: 100% both). It removes the false alarms and detects the same
+real shifts — full tables in [`reports/detector_evaluation.md`](reports/detector_evaluation.md).
 
 ## Why the textbook PSI threshold does not work
 
