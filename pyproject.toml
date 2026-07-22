@@ -12,7 +12,7 @@ license = { text = "MIT" }
 dependencies = [
     # The modelling layer is not reimplemented here — it is consumed from project A3,
     # pinned to a tag so a run is reproducible against a fixed modelling version.
-    "car-price-ml @ git+https://github.com/P0w3r223/car-price-ml@v0.1.0",
+    "car-price-ml @ git+https://github.com/P0w3r223/car-price-ml@v0.1.1",
     "mlflow>=2.16,<3",
     "pandas>=2.2,<3",
     "numpy>=1.26,<3",

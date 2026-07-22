@@ -27,7 +27,7 @@ import pandas as pd
 from car_price_ml import features as a3_features
 from car_price_ml import model as a3_model
 
-from mlops_car_price import dataset
+from mlops_car_price import dataset, registry, tracking
 from mlops_car_price.config import Config
 from mlops_car_price.config import load as load_config
 
@@ -45,6 +45,7 @@ class RunResult:
     model_size_mb: float
     train_seconds: float
     dataset_hash: str
+    registered_version: str | None = None
 
 
 def _sample(frame: pd.DataFrame, sample_rows: int | None, seed: int) -> pd.DataFrame:
@@ -60,6 +61,7 @@ def train_run(
     sample_rows: int | None = None,
     run_name: str | None = None,
     log_model_artifact: bool = False,
+    register: bool = False,
 ) -> RunResult:
     """Fit, evaluate on the frozen holdout, and record everything as one MLflow run.
 
@@ -67,8 +69,11 @@ def train_run(
         model_name: One of the A3 bake-off models; defaults to ``training.default_model``.
         sample_rows: Rows drawn from ``train_initial``; defaults to ``training.sample_rows``.
         log_model_artifact: Copy the fitted model into MLflow's artifact store. Off by
-            default — a RandomForest on this dataset serialises to ~563 MB, so a run
-            history of them would be measured in gigabytes (see docs/decisions/).
+            default — a RandomForest on this dataset serialises to hundreds of megabytes,
+            so a run history of them would be measured in gigabytes (ADR 0003).
+        register: Enter the run's model into the registry as a new version and label it
+            ``challenger``. Implies ``log_model_artifact``: an unstored model cannot be a
+            version. Exploration stays out of the registry; only candidates go in.
     """
     name = model_name or config.training.default_model
     known = tuple(a3_model.build_models().keys())
@@ -85,8 +90,7 @@ def train_run(
     x_train, y_train = a3_features.prepare(train_frame)
     x_holdout, y_holdout = a3_features.prepare(holdout_frame)
 
-    mlflow.set_tracking_uri(config.mlflow.resolve_tracking_uri())
-    mlflow.set_experiment(config.mlflow.experiment)
+    tracking.ensure_experiment(config)
 
     with mlflow.start_run(run_name=run_name) as run:
         started = time.perf_counter()
@@ -136,18 +140,30 @@ def train_run(
                 "holdout": "frozen",
             }
         )
-        if log_model_artifact:
+        if log_model_artifact or register:
             mlflow.sklearn.log_model(sk_model=fitted, artifact_path="model")
 
-        return RunResult(
-            run_id=run.info.run_id,
-            model_name=name,
-            metrics=metrics,
-            model_path=model_path,
-            model_size_mb=model_size_mb,
-            train_seconds=train_seconds,
-            dataset_hash=data_hash,
-        )
+        run_id = run.info.run_id
+
+    # Registration happens after the run is closed: a version points at a finished run.
+    registered_version = None
+    if register:
+        # Not named `version`: that would shadow the module-level importlib helper for the
+        # whole function, including the tag written above.
+        model_version = registry.register_run(config, run_id)
+        registry.set_alias(config, registry.CHALLENGER, model_version.version)
+        registered_version = model_version.version
+
+    return RunResult(
+        run_id=run_id,
+        model_name=name,
+        metrics=metrics,
+        model_path=model_path,
+        model_size_mb=model_size_mb,
+        train_seconds=train_seconds,
+        dataset_hash=data_hash,
+        registered_version=registered_version,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -163,6 +179,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also store the fitted model in MLflow's artifact store (large for RandomForest)",
     )
+    parser.add_argument(
+        "--register",
+        action="store_true",
+        help="register the model as a new version and label it challenger",
+    )
     args = parser.parse_args(argv)
 
     config = load_config(args.config) if args.config else load_config()
@@ -172,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         sample_rows=args.sample_rows,
         run_name=args.run_name,
         log_model_artifact=args.log_model,
+        register=args.register,
     )
 
     print(f"[train] model:   {result.model_name}")
@@ -182,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
         f"[train] cost:    {result.train_seconds:.1f}s train, "
         f"{result.model_size_mb:.1f} MB artifact"
     )
+    if result.registered_version:
+        print(f"[train] version: {result.registered_version} (alias: challenger)")
     return 0
 
 
