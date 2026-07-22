@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default=None, help="path to config.yaml")
     args = parser.parse_args(argv)
 
-    config = load_config(args.config) if args.config else load_config()
+    config = load_config(args.config)
     manifest = build(config)
 
     print(f"[dataset] source: {manifest['source']['name']}")

@@ -25,6 +25,20 @@ def client(config: Config) -> MlflowClient:
     return MlflowClient(tracking_uri=config.mlflow.resolve_tracking_uri())
 
 
+def _artifact_location(config: Config, tracking_uri: str) -> str | None:
+    """Where artifacts go — a local directory, or the server's own store.
+
+    Against a local backend the location is pinned so it does not follow the working
+    directory. Against a **tracking server** it must not be pinned at all: a client-side
+    path means nothing to the server, and the artifacts would be written somewhere the
+    serving container cannot reach. Returning None lets the server decide.
+    """
+    if tracking_uri.startswith(("sqlite:", "file:")):
+        config.mlflow.artifact_root.mkdir(parents=True, exist_ok=True)
+        return config.mlflow.artifact_root.as_uri()
+    return None
+
+
 def ensure_experiment(config: Config) -> str:
     """Return the experiment id, creating it with an explicit artifact root if needed.
 
@@ -32,14 +46,12 @@ def ensure_experiment(config: Config) -> str:
     means running the same command from another directory would quietly start a second
     artifact store. The root comes from the config instead.
     """
-    configure(config)
+    uri = configure(config)
     mlflow_client = client(config)
     experiment = mlflow_client.get_experiment_by_name(config.mlflow.experiment)
     if experiment is None:
-        config.mlflow.artifact_root.mkdir(parents=True, exist_ok=True)
         experiment_id = mlflow_client.create_experiment(
-            config.mlflow.experiment,
-            artifact_location=config.mlflow.artifact_root.as_uri(),
+            config.mlflow.experiment, artifact_location=_artifact_location(config, uri)
         )
     else:
         experiment_id = experiment.experiment_id
