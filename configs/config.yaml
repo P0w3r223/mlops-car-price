@@ -64,8 +64,12 @@ drift:
   wasserstein_threshold: 0.1
   # Resamples of the reference at the snapshot's size, used to measure what each column
   # scores against itself when nothing drifted. 0 turns calibration off (and restores the
-  # textbook fixed-threshold behaviour, which session 4 measures against this one).
-  calibration_resamples: 40
+  # textbook fixed-threshold behaviour, which examples/detector_evaluation.py measures
+  # against this one). 200 is what estimating a per-column tail this far out requires once
+  # the report-level confidence is divided across the columns.
+  calibration_resamples: 200
+  # Confidence for the whole report, not for one column: a report fires if any column does,
+  # so the tail is split across them before each column's floor is measured.
   calibration_quantile: 0.99
   ks_p_value_threshold: 0.01
   min_snapshot_rows: 500
