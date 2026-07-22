@@ -8,9 +8,9 @@ around the used-car price model from
 training runs, drift monitoring on simulated production traffic, and a promotion rule
 that decides — on evidence — when a challenger may replace the champion.
 
-> **Status: session 4 of 6.** Data versioning, MLflow tracking, the model registry, the
-> promotion gate, drift monitoring and the detector evaluation are in place. The retraining
-> loop and the versioned API land next; the roadmap is in the issues.
+> **Status: session 5 of 6.** Data versioning, MLflow tracking, the model registry, the
+> statistical promotion gate, drift monitoring, the detector evaluation and the retraining
+> loop are in place. The versioned API lands next; the roadmap is in the issues.
 
 ## The problem
 
@@ -20,7 +20,7 @@ the ones that come *after* the notebook:
 - Which exact rows produced this number, and can I get them back?
 - Has the incoming data moved away from what the model was trained on — and is that
   "movement" real or just noise from a large sample?
-- A new model looks better by 378 PLN. Is that an improvement, or a coin flip?
+- A new model looks better by 370 PLN. Is that an improvement, or a coin flip?
 - What is deployed right now, and what does it cost to keep replacing it?
 
 ## Architecture
@@ -39,11 +39,12 @@ src/mlops_car_price/
   drift/report.py          the verdict as markdown
   training/train.py        the only path to a trained model; one run = one record
   training/promote.py      the gate: score, judge, move the alias, record why
+  training/retrain.py      the loop: notice, retrain, judge, usually do nothing
 examples/                  scripts that regenerate the tables below
 ```
 
 The modelling code is not reimplemented here. `car_price_ml` is installed as a dependency
-pinned to tag `v0.1.0` and supplies cleaning, feature engineering, the models and the
+pinned to tag `v0.1.1` and supplies cleaning, feature engineering, the models and the
 metrics. This repo owns everything around the model — which is what "MLOps" means here.
 
 ### The data split
@@ -200,13 +201,64 @@ python -m mlops_car_price.drift.detector --week 1 --scenario price_shock
 
 Registering is proposing, not deploying. The gate scores the candidate **and** the current
 champion on the frozen holdout and refuses unless every rule passes: a holdout large enough
-to judge on, an artifact that reproduces the MAE its own run recorded, the same dataset
-version on both sides, the deployment budget, and an improvement past the configured margin.
-Serving code asks for `models:/car-price@champion` and never names a version.
+to judge on, an artifact that reproduces the MAE its own run recorded, the deployment budget,
+the same dataset version on both sides, an improvement past the configured margin, and an
+improvement that survives a paired bootstrap. Serving code asks for
+`models:/car-price@champion` and never names a version.
 
-One rule is deliberately still missing: whether an improvement is bigger than noise. A margin
-in złoty is not a significance test — the paired bootstrap over the per-row errors arrives in
-session 5, which is why scoring already keeps them.
+### Is a 370 PLN improvement real, or is it luck?
+
+The last two rules answer different questions — "is this worth the swap?" and "could this be
+sampling noise?" — and either alone promotes the wrong thing. The second is a **paired**
+bootstrap, because champion and challenger score the *same* cars:
+
+| | 95% interval for the improvement | width | p |
+|---|---|---:|---:|
+| paired | (+264.4, +474.9) PLN | 210.5 | 0.0002 |
+| unpaired | (+28.3, +715.2) PLN | 686.8 | 0.0342 |
+
+The per-row errors correlate at **0.906** — the same unusual cars are hard for both models.
+Ignoring that makes the interval **3.3× wider** and drops its lower bound to +28 PLN, a hair
+from zero: on a slightly smaller holdout the independent-samples tool would have refused a
+model that is genuinely better. The paired bootstrap did not exist in
+[ab-lab](https://github.com/P0w3r223/ab-lab), so it was added there (0.2.0) rather than
+written a second time here.
+
+So the RandomForest advantage **is real** — and it is still refused, by the deployment budget.
+The system now states an explicit trade: a genuine 4% accuracy gain, declined because a
+338 MB artifact cannot be retrained weekly and kept in a registry.
+
+## The loop, and how often it should do nothing
+
+```bash
+python -m mlops_car_price.training.retrain --weeks 11 --scenario mileage_shift
+```
+
+A quiet week ends the pass immediately — retraining on data that has not moved burns compute
+and hands the gate a coin flip to judge:
+
+```
+[retrain] week 10 / stable: clean
+[retrain] no retraining - no drift across 1 week(s) - the champion still fits the traffic
+```
+
+A drifted week trains a challenger on the original data **plus** the weeks that have arrived,
+registers it as a candidate, and lets the gate rule:
+
+```
+[retrain] week 11 / mileage_shift: DRIFT
+[retrain]   feature 'mileage': PSI 0.783 over 0.200
+[retrain]   error: MAE up 15.9% on the week (limit 10.0%)
+[retrain] challenger v3: MAE 9362.7 PLN
+[retrain]   MAE improves by -84.7 PLN, short of the required 100.0 PLN
+[retrain] champion is now v1
+```
+
+The challenger came out **worse** and was refused — which is the realistic outcome, not a
+failure of the loop. Two thousand new rows are 2.8% of the training set; one week of drifted
+traffic does not undo a covariate shift, it only dilutes it. A retraining loop whose
+challengers are always promoted is not a quality bar, it is a deployment script with extra
+steps.
 
 ## Run it
 
@@ -244,6 +296,9 @@ Full context in [`docs/decisions/`](docs/decisions/).
 - **[ADR 0006](docs/decisions/0006-calibrated-drift-thresholds.md) — thresholds are
   calibrated against the null.** A fixed PSI cutoff alarms on unshifted data whenever a
   column has many categories or the sample is small.
+- **[ADR 0007](docs/decisions/0007-statistical-promotion-gate.md) — a challenger must beat
+  the champion by more than sampling noise.** Paired, because both models score the same
+  cars; ignoring that correlation widens the interval 3.3× and nearly hides a real gain.
 - **SQLite, not a file store, for MLflow.** The model registry does not exist on a file
   backend — a constraint that only surfaces at `register_model` time.
 - **Drift gates on effect size, not p-values.** At 100k rows a KS test rejects for shifts

@@ -13,6 +13,9 @@ dependencies = [
     # The modelling layer is not reimplemented here — it is consumed from project A3,
     # pinned to a tag so a run is reproducible against a fixed modelling version.
     "car-price-ml @ git+https://github.com/P0w3r223/car-price-ml@v0.1.1",
+    # The promotion gate needs a *paired* bootstrap: champion and challenger score the same
+    # holdout rows. Added upstream in ab-lab 0.2.0 rather than reimplemented here.
+    "ab-lab @ git+https://github.com/P0w3r223/ab-lab@v0.2.0",
     "mlflow>=2.16,<3",
     "pandas>=2.2,<3",
     "numpy>=1.26,<3",

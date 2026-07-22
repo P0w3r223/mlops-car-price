@@ -4,19 +4,23 @@ The decision is deliberately boring and explicit. Every refusal names its reason
 whole decision is written back to MLflow, so the registry answers "why is *this* model
 serving?" months later without anyone remembering.
 
-Four checks run today:
+Six checks run:
 
 1. the holdout is large enough for a comparison to mean anything,
 2. the candidate artifact **reproduces the MAE its own run recorded** — if loading the
    stored model gives a different number, the artifact or the data is wrong and nothing
    downstream should be trusted,
-3. candidate and champion were scored on the **same dataset version**,
-4. the improvement clears the configured margin.
+3. the artifact fits the deployment budget (ADR 0003),
+4. candidate and champion were scored on the **same dataset version**,
+5. the improvement clears the configured margin — "is this worth the swap?",
+6. the improvement survives a **paired bootstrap** of the per-row errors — "is this more
+   than noise?".
 
-One check is deliberately missing: whether the improvement is larger than noise. A margin
-in złoty is not a significance test, and 23 571 paired rows deserve one. That arrives in
-session 5 as a paired bootstrap over the per-row errors, which is why scoring already
-returns them.
+The last two are different questions and both have to be answered. A margin in złoty says
+nothing about sampling variation; a confidence interval says nothing about whether anyone
+cares. The bootstrap is paired because champion and challenger score the *same* rows: an
+unpaired interval counts the between-car variance twice and hides real differences behind
+it (ab-lab ADR 0005).
 
     python -m mlops_car_price.training.promote --version 2
     python -m mlops_car_price.training.promote --run-id <id> --register --dry-run
@@ -30,6 +34,8 @@ from dataclasses import dataclass, field
 import mlflow
 import numpy as np
 import pandas as pd
+from ab_lab import paired_bootstrap
+from ab_lab.results import TestResult
 from car_price_ml import features as a3_features
 from car_price_ml import model as a3_model
 from mlflow.entities.model_registry import ModelVersion
@@ -62,6 +68,7 @@ class PromotionDecision:
     candidate: Scored
     champion: Scored | None
     n_holdout: int
+    evidence: TestResult | None = None
 
     @property
     def delta_mae(self) -> float | None:
@@ -101,6 +108,24 @@ def score_version(
         dataset_hash=run.data.tags.get("dataset_hash"),
         artifact_mb=run.data.metrics.get("model_size_mb"),
         absolute_errors=np.abs(np.asarray(y, dtype=float) - np.asarray(predictions, dtype=float)),
+    )
+
+
+def compare_errors(config: Config, candidate: Scored, champion: Scored) -> TestResult:
+    """Is the champion's error genuinely larger than the candidate's, on the same rows?
+
+    The two models scored identical cars, so the comparison is paired: resampling the two
+    error vectors independently would count the between-car variance twice and bury a real
+    difference under it. The estimate is champion minus candidate, so a positive interval
+    that excludes zero means the candidate is better by more than sampling noise.
+    """
+    return paired_bootstrap(
+        control=candidate.absolute_errors,
+        treatment=champion.absolute_errors,
+        statistic=np.mean,
+        alpha=config.promotion.alpha,
+        n_resamples=config.promotion.bootstrap_resamples,
+        rng=np.random.default_rng(config.seed),
     )
 
 
@@ -159,12 +184,29 @@ def decide(
         )
         return PromotionDecision(False, tuple(reasons), candidate, champion, n_holdout)
 
+    evidence = compare_errors(config, candidate, champion)
+    if evidence.ci is None or evidence.ci.low <= 0.0:
+        reasons.append(
+            f"MAE improves by {delta:.1f} PLN, but the {1 - config.promotion.alpha:.0%} "
+            f"interval spans zero ({evidence.ci.low:+.1f}, {evidence.ci.high:+.1f}) - "
+            f"not distinguishable from noise on {n_holdout:,} paired rows"
+        )
+        return PromotionDecision(
+            False, tuple(reasons), candidate, champion, n_holdout, evidence
+        )
+
     return PromotionDecision(
         True,
-        (f"MAE improves by {delta:.1f} PLN, clearing the {margin:.1f} PLN margin",),
+        (
+            f"MAE improves by {delta:.1f} PLN, clearing the {margin:.1f} PLN margin",
+            f"the improvement holds at {1 - config.promotion.alpha:.0%} confidence: "
+            f"({evidence.ci.low:+.1f}, {evidence.ci.high:+.1f}) PLN on {n_holdout:,} "
+            f"paired rows",
+        ),
         candidate,
         champion,
         n_holdout,
+        evidence,
     )
 
 
@@ -214,12 +256,22 @@ def apply_decision(config: Config, decision: PromotionDecision) -> None:
                 "decision": "promoted" if decision.promoted else "rejected",
             }
         )
+        evidence = decision.evidence
         mlflow.log_metrics(
             {
                 "candidate_mae": decision.candidate.mae,
                 "n_holdout": decision.n_holdout,
                 **({"champion_mae": decision.champion.mae} if decision.champion else {}),
                 **({"delta_mae": decision.delta_mae} if decision.delta_mae is not None else {}),
+                **(
+                    {
+                        "delta_ci_low": evidence.ci.low,
+                        "delta_ci_high": evidence.ci.high,
+                        "delta_p_value": evidence.p_value,
+                    }
+                    if evidence is not None and evidence.ci is not None
+                    else {}
+                ),
             }
         )
         mlflow.set_tag("promotion_reason", " | ".join(decision.reasons))
