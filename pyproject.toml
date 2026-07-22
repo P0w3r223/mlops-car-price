@@ -24,12 +24,15 @@ dependencies = [
     # decision logic and PSI are implemented here; well-tested numerics are not rewritten.
     "scipy>=1.11,<2",
     "pyyaml>=6,<7",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3,<9",
     "ruff>=0.6,<1",
+    "httpx>=0.27,<1",
 ]
 # Not a runtime or CI dependency: Evidently exists here only to referee the drift metrics
 # when they change (see ADR 0005 and tests/test_drift_oracle.py).

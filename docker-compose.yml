@@ -1,0 +1,58 @@
+# The registry and the service, wired the way they would be in a small deployment.
+#
+#   docker compose up -d mlflow
+#   docker compose --profile bootstrap run --rm bootstrap   # build data, train, promote
+#   docker compose up -d api
+#   curl localhost:8000/model-info
+#
+# The tracking server owns the artifacts (--serve-artifacts), so the API never needs a
+# shared filesystem with it - it fetches the champion over HTTP like any other client.
+
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.22.0
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////store/mlflow.db
+      --artifacts-destination /store/artifacts
+      --serve-artifacts
+    volumes:
+      - mlflow-store:/store
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: builds the splits from the mounted source data, trains a model, registers it
+  # and lets the promotion gate decide. Run it once before the API has anything to serve.
+  bootstrap:
+    build: .
+    profiles: ["bootstrap"]
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./data:/app/data
+    user: root
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    command: >
+      sh -c "python -m mlops_car_price.dataset build
+      && python -m mlops_car_price.training.train --register
+      && python -m mlops_car_price.training.promote --version 1"
+
+  api:
+    build: .
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    ports:
+      - "8000:8000"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+
+volumes:
+  mlflow-store:
