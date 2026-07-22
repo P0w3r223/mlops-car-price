@@ -26,6 +26,7 @@ src/mlops_car_price/
   drift/report.py            # the verdict as markdown
   training/train.py          # the only way a model gets trained; one run = one record
   training/promote.py        # the gate: score, judge, move the alias, record why
+  training/retrain.py        # the loop: drift -> challenger -> gate -> usually nothing
 examples/                    # scripts that regenerate the README's tables
 tests/
 docs/decisions/              # ADRs
@@ -53,6 +54,7 @@ python -m mlops_car_price.training.train --model LightGBM --register
 python -m mlops_car_price.training.promote --version 1 [--dry-run]
 python -m mlops_car_price.replay --week 1 --scenario price_shock
 python -m mlops_car_price.drift.detector --week 1 --scenario price_shock
+python -m mlops_car_price.training.retrain --weeks 11 --scenario mileage_shift
 python examples/drift_scenarios.py                 # regenerate the scenario table
 python examples/detector_evaluation.py             # false alarms + power (~25 min)
 python examples/artifact_cost.py                   # regenerate the cost table
@@ -94,10 +96,13 @@ ruff check .                                       # lint
 - **`stream_pool` is the only source of snapshots**, and a scenario is a parameterised
   transformation applied after the draw. Adding a scenario means adding a way for data to
   break, not a way to make a detector look good.
-- **A challenger is promoted only on evidence**: paired bootstrap CI of the MAE difference
-  excludes zero, the point improvement clears the configured margin, and the holdout is
-  large enough. Champion/challenger comparisons are paired — the two models score the same
-  rows — so an unpaired test is the wrong tool.
+- **A challenger is promoted only on evidence**: the paired bootstrap CI of the MAE
+  difference excludes zero, the point improvement clears the configured margin, and the
+  holdout is large enough. The comparison is paired because both models score the same rows;
+  measured on real data, the unpaired interval is 3.3x wider and nearly spans zero on a
+  genuine improvement (ADR 0007). Never swap in `bootstrap_diff` here.
+- **Refusing is the normal outcome.** A retraining loop whose challengers are always promoted
+  is a deployment script, not a quality bar. Do not tune the gate until it says yes.
 - **The deployment budget is a promotion rule, not advice.** A candidate over
   `promotion.max_artifact_mb` is refused however well it scores (ADR 0003). Raising the
   budget is a reviewed config change, never a workaround inside a run.
