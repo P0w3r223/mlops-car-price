@@ -296,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    config = load_config(args.config) if args.config else load_config()
+    config = load_config(args.config)
     version = args.version or registry.register_run(config, args.run_id).version
 
     decision = promote(config, version, dry_run=args.dry_run)

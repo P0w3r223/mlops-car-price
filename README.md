@@ -8,9 +8,9 @@ around the used-car price model from
 training runs, drift monitoring on simulated production traffic, and a promotion rule
 that decides — on evidence — when a challenger may replace the champion.
 
-> **Status: session 5 of 6.** Data versioning, MLflow tracking, the model registry, the
-> statistical promotion gate, drift monitoring, the detector evaluation and the retraining
-> loop are in place. The versioned API lands next; the roadmap is in the issues.
+> **Complete.** Data versioning, MLflow tracking, the model registry, the statistical
+> promotion gate, drift monitoring with an evaluated detector, the retraining loop and the
+> versioned API are all in place. Further ideas live in the issues, labelled `roadmap`.
 
 ## The problem
 
@@ -40,12 +40,38 @@ src/mlops_car_price/
   training/train.py        the only path to a trained model; one run = one record
   training/promote.py      the gate: score, judge, move the alias, record why
   training/retrain.py      the loop: notice, retrain, judge, usually do nothing
+  api/main.py              serves whatever the champion alias points at
 examples/                  scripts that regenerate the tables below
+Dockerfile, docker-compose.yml   the registry and the service, wired together
 ```
 
 The modelling code is not reimplemented here. `car_price_ml` is installed as a dependency
 pinned to tag `v0.1.1` and supplies cleaning, feature engineering, the models and the
 metrics. This repo owns everything around the model — which is what "MLOps" means here.
+
+```mermaid
+flowchart LR
+    csv[(Kaggle CSV<br/>CC0)] --> split[dataset.build]
+    split --> train_initial[train_initial<br/>70 715]
+    split --> holdout[holdout_eval<br/>23 571<br/>frozen]
+    split --> pool[stream_pool<br/>23 573]
+
+    train_initial --> run[train.py<br/>MLflow run]
+    run -->|--register| version[model version]
+    version -->|challenger| gate{promotion gate}
+    holdout --> gate
+    gate -->|refused| version
+    gate -->|accepted| champion[[alias: champion]]
+
+    pool --> week[replay: one week<br/>+ drift scenario]
+    week --> monitor{drift detector}
+    champion --> monitor
+    monitor -->|drift| retrain[retrain: challenger<br/>on extended data]
+    retrain --> version
+    monitor -->|clean| nothing([do nothing])
+
+    champion --> api[/API: predict, model-info/]
+```
 
 ### The data split
 
@@ -260,15 +286,46 @@ traffic does not undo a covariate shift, it only dilutes it. A retraining loop w
 challengers are always promoted is not a quality bar, it is a deployment script with extra
 steps.
 
-## Run it
+## Serving the champion
+
+The service never names a model version. It resolves `models:/car-price@champion` at startup,
+so promoting a different version and restarting *is* the deployment — the image contains no
+model and this repository does not change when the model does ([ADR 0008](docs/decisions/0008-serving-an-alias.md)).
+
+```bash
+docker compose up -d mlflow
+docker compose --profile bootstrap run --rm bootstrap   # build splits, train, promote
+docker compose up -d api
+curl localhost:8000/model-info
+```
+
+```json
+{"version":"1","model_name":"LightGBM","holdout_mae":9278.0,
+ "dataset_hash":"5bde21653f15...","car_price_ml_version":"0.1.1",
+ "promotion_reason":"no champion registered yet - the first valid candidate takes the alias",
+ "trained_at":"2026-07-22T16:06:05.961000+00:00"}
+```
+
+`POST /predict` answers with the price and echoes `X-Model-Version`, so a prediction can be
+traced to the model that made it after the alias has moved on. `GET /health` reports
+**degraded** rather than crash-looping when no champion exists — that is what a fresh
+environment looks like, not a failure. The tracking server owns the artifacts
+(`--serve-artifacts`), so the API fetches the champion over HTTP and shares no filesystem
+with it.
+
+The containerised run reproduces the host exactly: same 9 278.0 PLN holdout MAE, same
+35 772.63 PLN valuation for the same car.
+
+## Run it locally
 
 ```bash
 python -m venv .venv && .venv/Scripts/python -m pip install -e ".[dev]"
 kaggle datasets download -d aleksandrglotov/car-prices-poland -p data/raw --unzip
-python -m mlops_car_price.dataset build && python -m mlops_car_price.training.train
+python -m mlops_car_price.dataset build && python -m mlops_car_price.training.train --register
 ```
 
-Then `mlflow ui --backend-store-uri sqlite:///mlflow.db` to inspect the runs.
+Then `mlflow ui --backend-store-uri sqlite:///mlflow.db` to inspect runs and versions, or
+`python -m mlops_car_price.training.retrain --weeks 1` to run one pass of the maintenance loop.
 
 ## Technical decisions
 
@@ -299,21 +356,49 @@ Full context in [`docs/decisions/`](docs/decisions/).
 - **[ADR 0007](docs/decisions/0007-statistical-promotion-gate.md) — a challenger must beat
   the champion by more than sampling noise.** Paired, because both models score the same
   cars; ignoring that correlation widens the interval 3.3× and nearly hides a real gain.
+- **[ADR 0008](docs/decisions/0008-serving-an-alias.md) — the service resolves an alias and
+  starts degraded rather than not at all.** Deployment and promotion become separate acts;
+  a fresh environment with no champion is a normal state, not a crash loop.
 - **SQLite, not a file store, for MLflow.** The model registry does not exist on a file
   backend — a constraint that only surfaces at `register_model` time.
-- **Drift gates on effect size, not p-values.** At 100k rows a KS test rejects for shifts
-  far too small to matter. Measured, not asserted — session 4.
+- **Drift gates on effect size, not p-values.** Measured rather than asserted: a KS gate
+  reaches 100% detection on a shift too small to act on, purely by growing `n`.
 
 ## Limitations
 
+Written after building it, not before.
+
 - **The production stream is simulated.** The drift scenarios are named, parameterised and
-  documented, but they are generated, not observed. Nothing here proves the model degrades
-  on the real 2026 Polish market — only that the system detects and reacts to degradation
-  when it happens.
+  documented, but they are generated, not observed. Nothing here proves the model degrades on
+  the real 2026 Polish market — only that the system detects and reacts to degradation when it
+  happens.
 - **The source dataset has no listing date.** "Weeks" are a replay construct; the split is
-  random, not chronological, so this project cannot demonstrate genuine temporal drift.
-- **Prices are historical** (dataset vintage ~2021), and `age` is derived from a fixed
-  reference year inherited from A3.
+  random, not chronological, so genuine temporal drift and seasonality are out of reach.
+- **Prices are historical** (dataset vintage ~2021) and `age` comes from a fixed reference
+  year inherited from A3, so the absolute złoty figures are not today's market.
+- **Nothing runs on a schedule.** The loop works end to end locally and in containers, but a
+  weekly CI run would need the Kaggle source, which is not in the repository. A green badge on
+  fabricated data would be worse than no badge ([issue #10](https://github.com/P0w3r223/mlops-car-price/issues/10)).
+- **The dataset hash is environment-sensitive.** It covers the bytes *as this environment
+  serialises them*, so a different pyarrow version produces a different hash for identical
+  rows. That makes the gate refuse to compare across environments — conservative, and worth
+  knowing before it surprises someone.
+- **Picking up a new champion requires a restart.** Deliberate: a hot-reload endpoint would let
+  the serving version change underneath a running experiment.
+- **The promotion gate answers sampling variation, not fitness for the future.** The interval
+  is computed on one frozen holdout; whether that holdout still resembles next month's traffic
+  is what the drift monitoring is for.
+
+## What I would do differently
+
+- **Test reproducibility on day one.** The seeded-preprocessing bug (ADR 0004) sat under three
+  sessions of work and was the same order as the promotion margin it would have corrupted.
+- **Distrust a threshold before shipping it.** The calibration work (ADR 0006) came from a
+  detector firing on the control case; the evaluation harness that should have caught it
+  existed only one session later.
+- **Expect the installed package to behave differently.** ADR 0001 documents this trap for the
+  modelling layer, and this package still walked into it — the config default resolved inside
+  `site-packages` the first time it ran from a container.
 
 ## Licence
 
