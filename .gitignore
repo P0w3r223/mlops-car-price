@@ -1,0 +1,21 @@
+# Environments
+.venv/
+__pycache__/
+*.egg-info/
+
+# Data: the source is an open Kaggle dataset (CC0) — the repo ships the code that
+# rebuilds the splits, never the rows themselves.
+data/
+
+# Trained models. A RandomForest on this dataset is ~563 MB; the artifacts are
+# reproducible from a run id, so nothing here belongs in git.
+models/
+
+# MLflow local backend + artifact store
+mlflow.db
+mlruns/
+mlartifacts/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/

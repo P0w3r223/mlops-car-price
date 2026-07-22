@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlops-car-price"
+version = "0.1.0"
+description = "MLOps layer over the used-car price model: MLflow tracking and registry, drift monitoring, champion/challenger retraining"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    # The modelling layer is not reimplemented here — it is consumed from project A3,
+    # pinned to a tag so a run is reproducible against a fixed modelling version.
+    "car-price-ml @ git+https://github.com/P0w3r223/car-price-ml@v0.1.0",
+    "mlflow>=2.16,<3",
+    "pandas>=2.2,<3",
+    "numpy>=1.26,<3",
+    "pyarrow>=16,<21",
+    "pyyaml>=6,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9",
+    "ruff>=0.6,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # MLflow ships Pydantic models written against an older API — third-party, cosmetic.
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince212",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
