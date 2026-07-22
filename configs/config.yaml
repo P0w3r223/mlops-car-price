@@ -6,7 +6,9 @@ seed: 42
 paths:
   raw_csv: data/raw/Car_Prices_Poland_Kaggle.csv
   processed_dir: data/processed
+  snapshots_dir: data/snapshots
   models_dir: models
+  reports_dir: reports
 
 # Three-way split of the source dataset. `holdout_eval` is frozen for the life of the
 # project: every champion/challenger comparison is decided on these exact rows, so the
@@ -40,14 +42,39 @@ training:
   # number so a workflow run stays minutes, not hours.
   sample_rows: null
 
-# Consumed from session 3 onward (drift monitoring).
+# The simulated production stream: weekly snapshots drawn from stream_pool, optionally
+# transformed by a named scenario (ADR 0002).
+replay:
+  # Rows per weekly snapshot. Drawn with replacement, so weeks are independent draws from
+  # the same reserve rather than a slice of it — that is what makes a "no drift" snapshot
+  # a genuine null for measuring false alarms.
+  snapshot_rows: 2000
+
 drift:
   # Gates run on effect size, not on p-values: at 100k rows a KS test rejects for shifts
   # far too small to matter. The KS p-value is reported as a diagnostic only.
+  # These two are the "does it matter?" floor. The "is it more than noise?" floor is
+  # measured per column at run time (see calibration below), and a column is flagged only
+  # when it clears both - a fixed 0.2 alarms on unshifted data whenever the sample is small
+  # or the column has many categories.
   psi_threshold: 0.2
+  # Numeric columns only: Wasserstein distance in units of the reference standard
+  # deviation. The categorical distance reported next to it (total variation) is on a
+  # different scale, so it stays a diagnostic rather than a gate.
   wasserstein_threshold: 0.1
+  # Resamples of the reference at the snapshot's size, used to measure what each column
+  # scores against itself when nothing drifted. 0 turns calibration off (and restores the
+  # textbook fixed-threshold behaviour, which session 4 measures against this one).
+  calibration_resamples: 40
+  calibration_quantile: 0.99
   ks_p_value_threshold: 0.01
   min_snapshot_rows: 500
+  # A field that arrives empty is invisible to distribution metrics computed on the rows
+  # that survived, so the missing rate is watched separately.
+  max_missing_rate_increase: 0.05
+  # The only signal that catches a shift in the target itself: realised error against what
+  # the champion scored on the frozen holdout.
+  max_mae_increase_pct: 10.0
 
 # Consumed from session 5 onward (champion/challenger promotion).
 promotion:
