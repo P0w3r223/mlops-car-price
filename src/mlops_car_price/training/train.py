@@ -62,6 +62,7 @@ def train_run(
     run_name: str | None = None,
     log_model_artifact: bool = False,
     register: bool = False,
+    training_frame: pd.DataFrame | None = None,
 ) -> RunResult:
     """Fit, evaluate on the frozen holdout, and record everything as one MLflow run.
 
@@ -74,6 +75,9 @@ def train_run(
         register: Enter the run's model into the registry as a new version and label it
             ``challenger``. Implies ``log_model_artifact``: an unstored model cannot be a
             version. Exploration stays out of the registry; only candidates go in.
+        training_frame: Rows to train on, replacing ``train_initial``. The retraining loop
+            passes the original data plus the weeks that have since arrived. The **holdout
+            is never part of it** — that is the whole reason the split is frozen.
     """
     name = model_name or config.training.default_model
     known = tuple(a3_model.build_models().keys())
@@ -84,7 +88,9 @@ def train_run(
     manifest = dataset.read_manifest(config)
     data_hash = dataset.dataset_hash(config)
 
-    train_split = dataset.load_split("train_initial", config)
+    train_split = (
+        dataset.load_split("train_initial", config) if training_frame is None else training_frame
+    )
     train_frame = _sample(train_split, effective_sample, config.seed)
     holdout_frame = dataset.load_split("holdout_eval", config)
     x_train, y_train = a3_features.prepare(train_frame)
@@ -120,6 +126,9 @@ def train_run(
                 "n_train": len(x_train),
                 "n_holdout": len(x_holdout),
                 "sample_rows": effective_sample,
+                # Says whether this model saw only the original split or the weeks that
+                # arrived after it - two runs with the same dataset hash can still differ.
+                "training_data": "train_initial" if training_frame is None else "extended",
                 "features": ",".join(a3_features.FEATURE_COLUMNS),
             }
         )
