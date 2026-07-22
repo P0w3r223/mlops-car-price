@@ -19,8 +19,14 @@ splits:
 
 mlflow:
   experiment: mlops-car-price
+  # Name under which model versions are registered; aliases champion/challenger point
+  # into it. Stages are deprecated since MLflow 2.9 — aliases are the current mechanism.
+  registered_model: car-price
   # The model registry does not work on a file store, so the backend is SQLite.
   backend_store: mlflow.db
+  # Pinned so artifacts land in the same place no matter which directory a command
+  # is run from; MLflow would otherwise resolve its default against the working dir.
+  artifact_root: mlruns
   # Set to an explicit URI (e.g. http://localhost:5000) to use a tracking server
   # instead of the local SQLite file. MLFLOW_TRACKING_URI overrides both.
   tracking_uri: null
@@ -52,3 +58,13 @@ promotion:
   alpha: 0.05
   bootstrap_resamples: 10000
   min_holdout_rows: 5000
+  # The deployment budget, enforced by the gate rather than by prose in a README: a model
+  # the maintenance loop cannot carry is refused however well it scores. 50 MB leaves room
+  # for a gradient-boosting model to grow and rules out a full random forest (~340 MB,
+  # 17 GB of registry a year at one retraining a week) — see ADR 0003.
+  max_artifact_mb: 50.0
+  # A candidate is re-scored on the holdout before it is judged; if the artifact does not
+  # reproduce the MAE its own run recorded, something is wrong with the artifact or the
+  # data and no comparison should be trusted. One złoty is far below any real difference
+  # and far above float noise.
+  mae_reproduction_tolerance_pln: 1.0

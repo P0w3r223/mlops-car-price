@@ -8,9 +8,9 @@ around the used-car price model from
 training runs, drift monitoring on simulated production traffic, and a promotion rule
 that decides — on evidence — when a challenger may replace the champion.
 
-> **Status: session 1 of 6.** Data versioning and MLflow tracking are in place. The model
-> registry, drift monitoring, the retraining loop and the versioned API land in the
-> sessions that follow; the roadmap is in the issues.
+> **Status: session 2 of 6.** Data versioning, MLflow tracking, the model registry and the
+> promotion gate are in place. Drift monitoring, the retraining loop and the versioned API
+> land in the sessions that follow; the roadmap is in the issues.
 
 ## The problem
 
@@ -30,7 +30,11 @@ configs/config.yaml        every threshold, proportion and path
 src/mlops_car_price/
   config.py                YAML -> frozen dataclasses, validated on load
   dataset.py               three-way split + content manifest (the data version)
+  tracking.py              MLflow wiring: tracking URI, experiment, client
+  registry.py              versions and the champion/challenger aliases
   training/train.py        the only path to a trained model; one run = one record
+  training/promote.py      the gate: score, judge, move the alias, record why
+examples/artifact_cost.py  regenerates the operational cost table below
 ```
 
 The modelling code is not reimplemented here. `car_price_ml` is installed as a dependency
@@ -52,25 +56,63 @@ Each split is hashed into `data/processed/manifest.json`, and the hash of that m
 stamped on every training run. Two runs carrying the same dataset hash saw byte-identical
 data — which is the only condition under which comparing them means anything.
 
-## Results so far
+## What a model costs to operate
 
-Both models trained on `train_initial`, scored on the frozen holdout, seed 42:
+Accuracy is one column. Trained on `train_initial`, scored on the frozen holdout, seed 42
+(regenerate with `python examples/artifact_cost.py`):
 
-| Model | MAE (PLN) | RMSE (PLN) | MAPE | R² | Train time | Artifact |
-|---|---:|---:|---:|---:|---:|---:|
-| LightGBM | 9 280 | 21 226 | 14.7% | 0.935 | 1.8 s | **3.3 MB** |
-| RandomForest | 8 901 | 21 148 | 14.5% | 0.936 | 7.6 s | **338.6 MB** |
+| Model | Holdout MAE | Train | Artifact | Load | Predict p50 | Predict p95 | Batch | Registry / year |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Ridge | 15 422 PLN | 0.1 s | 0.0 MB | 0.00 s | 5.1 ms | 6.1 ms | 728k rows/s | 0.0 GB |
+| LightGBM | 9 278 PLN | 1.7 s | 3.3 MB | 0.03 s | 12.9 ms | 13.7 ms | 119k rows/s | 0.2 GB |
+| RandomForest | 8 908 PLN | 7.8 s | 338.5 MB | 0.44 s | 47.1 ms | 68.2 ms | 148k rows/s | 17.2 GB |
 
-RandomForest wins by 378 PLN (4.1% of MAE) and costs **103× more storage**. A weekly
-retraining loop keeping a registry of those artifacts would be measured in gigabytes.
-Two questions follow, and both are deferred to the sessions that can answer them
-properly rather than guessed at now:
+RandomForest is 370 PLN (4.0%) better and costs 103× the storage, 5× the p95 request
+latency and 17.2 GB of registry a year at one retraining a week. So the deployment budget
+is enforced by the gate, not by a paragraph — the real candidate was refused:
 
-- Is the 378 PLN gap statistically real on 23 571 paired rows? → the promotion gate.
-- Is it worth 335 MB per model version? → the artifact-cost ADR.
+```
+[promote] candidate v2 (RandomForest): MAE 8908.2 PLN
+[promote] champion  v1 (LightGBM): MAE 9278.0 PLN
+[promote] reason: artifact is 338.5 MB, over the 50.0 MB deployment budget
+[promote] REJECTED - candidate v2, delta +369.8 PLN
+```
 
-That is why `training.default_model` is LightGBM: the offline winner is not automatically
-the model a maintenance loop can carry.
+## The bug this project found in its own foundation
+
+Two runs of the same model, same seed, same rows, kept disagreeing:
+
+```
+RandomForest, random_state=42: 8841.2 PLN, then 8914.1 PLN
+LightGBM,     random_state=42: 9331.0 / 9266.7 / 9278.2 PLN
+```
+
+The estimators were seeded; the **preprocessing was not**. A3's target encoder shuffled its
+internal cross-fitting folds from an unseeded RNG, so identical data produced different
+encodings. A ~70 PLN spread is nothing next to a 9 000 PLN MAE — and everything next to a
+100 PLN promotion margin. The gate would have been reading noise part of the time.
+
+Fixed upstream in [car-price-ml#3](https://github.com/P0w3r223/car-price-ml/pull/3)
+(v0.1.1), not worked around here ([ADR 0004](docs/decisions/0004-reproducibility-fixed-upstream.md)).
+Runs now reproduce to the decimal. The dataset hash changed with the pin, which is exactly
+what a data version should do when the code that cleans the data changes.
+
+## How a model reaches production
+
+```bash
+python -m mlops_car_price.training.train --model LightGBM --register  # -> version, alias challenger
+python -m mlops_car_price.training.promote --version 1                # -> judged, alias moved
+```
+
+Registering is proposing, not deploying. The gate scores the candidate **and** the current
+champion on the frozen holdout and refuses unless every rule passes: a holdout large enough
+to judge on, an artifact that reproduces the MAE its own run recorded, the same dataset
+version on both sides, the deployment budget, and an improvement past the configured margin.
+Serving code asks for `models:/car-price@champion` and never names a version.
+
+One rule is deliberately still missing: whether an improvement is bigger than noise. A margin
+in złoty is not a significance test — the paired bootstrap over the per-row errors arrives in
+session 5, which is why scoring already keeps them.
 
 ## Run it
 
@@ -94,6 +136,13 @@ Full context in [`docs/decisions/`](docs/decisions/).
   a replay, not a scraper.** A3 rejected scraping the Polish listing sites (database
   *sui generis* right, ToS), and that decision does not expire because a later project
   would find fresh data convenient.
+- **[ADR 0003](docs/decisions/0003-lightgbm-as-the-production-model.md) — LightGBM serves,
+  and the budget is in the gate.** The offline winner is not automatically the model a
+  maintenance loop can carry; 0.23 pp of MAPE bought two orders of magnitude on every
+  operation the loop performs.
+- **[ADR 0004](docs/decisions/0004-reproducibility-fixed-upstream.md) — the determinism bug
+  was fixed in A3, not patched around here.** Duplicating the preprocessing would have
+  defeated the point of consuming it as a package.
 - **SQLite, not a file store, for MLflow.** The model registry does not exist on a file
   backend — a constraint that only surfaces at `register_model` time.
 - **Drift gates on effect size, not p-values.** At 100k rows a KS test rejects for shifts

@@ -17,13 +17,22 @@ configs/config.yaml          # every threshold, proportion and path — no liter
 src/mlops_car_price/
   config.py                  # YAML -> frozen dataclasses, validated on load
   dataset.py                 # three-way split + content manifest (the data version)
+  tracking.py                # MLflow wiring: tracking URI, experiment, client
+  registry.py                # model versions + champion/challenger aliases
   training/train.py          # the only way a model gets trained; one run = one record
+  training/promote.py        # the gate: score, judge, move the alias, record why
+examples/                    # scripts that regenerate the README's tables
 tests/
 docs/decisions/              # ADRs
 ```
 
 Data flows one way: `dataset` writes the splits and the manifest, `training` reads them
 and records a run. Nothing writes back into the source data.
+
+Vocabulary that must stay straight: a **run** is one training execution, a **model
+version** is an artifact entered into the registry, an **alias** (`champion`,
+`challenger`) is a movable label saying which version serves. Registering is proposing;
+moving the `champion` alias is deploying.
 
 The modelling code is **not** reimplemented here. `car_price_ml` (project A3, pinned to
 tag `v0.1.0`) supplies cleaning, feature engineering, the model bake-off and the metrics.
@@ -35,8 +44,10 @@ This repo owns everything *around* the model.
 python -m venv .venv && .venv/Scripts/python -m pip install -e ".[dev]"
 kaggle datasets download -d aleksandrglotov/car-prices-poland -p data/raw --unzip
 python -m mlops_car_price.dataset build            # splits + manifest
-python -m mlops_car_price.training.train --model LightGBM
-mlflow ui --backend-store-uri sqlite:///mlflow.db  # inspect runs
+python -m mlops_car_price.training.train --model LightGBM --register
+python -m mlops_car_price.training.promote --version 1 [--dry-run]
+python examples/artifact_cost.py                   # regenerate the cost table
+mlflow ui --backend-store-uri sqlite:///mlflow.db  # inspect runs and versions
 pytest                                             # full suite
 ruff check .                                       # lint
 ```
@@ -67,6 +78,13 @@ ruff check .                                       # lint
   excludes zero, the point improvement clears the configured margin, and the holdout is
   large enough. Champion/challenger comparisons are paired — the two models score the same
   rows — so an unpaired test is the wrong tool.
+- **The deployment budget is a promotion rule, not advice.** A candidate over
+  `promotion.max_artifact_mb` is refused however well it scores (ADR 0003). Raising the
+  budget is a reviewed config change, never a workaround inside a run.
+- **A candidate is re-scored before it is judged.** If a stored artifact no longer
+  reproduces the MAE its own run recorded, nothing downstream is trustworthy — refuse.
+- **Reproducibility is a claim to be tested.** Same seed and same data must give the same
+  number; when that broke it was a real bug in the modelling layer, fixed there (ADR 0004).
 - **The A3 methodology still applies** where this repo touches modelling: log-price target
   inverted before metrics, `age` instead of raw `year`, out-of-fold target encoding.
 

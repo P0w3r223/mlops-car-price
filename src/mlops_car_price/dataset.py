@@ -85,7 +85,7 @@ def build(config: Config) -> dict:
     """
     if not config.paths.raw_csv.exists():
         raise FileNotFoundError(
-            f"no source dataset at {config.paths.raw_csv} — see README (kaggle datasets download)"
+            f"no source dataset at {config.paths.raw_csv} - see README (kaggle datasets download)"
         )
 
     raw = a3_data.load_raw(path=config.paths.raw_csv)
@@ -125,7 +125,7 @@ def read_manifest(config: Config) -> dict:
     """Load the manifest, with a message that says how to create it if it is absent."""
     if not config.paths.manifest.exists():
         raise FileNotFoundError(
-            f"no manifest at {config.paths.manifest} — "
+            f"no manifest at {config.paths.manifest} - "
             "run `python -m mlops_car_price.dataset build`"
         )
     return json.loads(config.paths.manifest.read_text(encoding="utf-8"))
@@ -141,7 +141,7 @@ def load_split(name: str, config: Config) -> pd.DataFrame:
     path = split_path(name, config)
     if not path.exists():
         raise FileNotFoundError(
-            f"no {name} split at {path} — run `python -m mlops_car_price.dataset build`"
+            f"no {name} split at {path} - run `python -m mlops_car_price.dataset build`"
         )
     return pd.read_parquet(path)
 

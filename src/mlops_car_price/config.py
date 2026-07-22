@@ -71,10 +71,12 @@ class PathsConfig:
 
 @dataclass(frozen=True)
 class MlflowConfig:
-    """Where runs are recorded."""
+    """Where runs are recorded and where model versions live."""
 
     experiment: str
+    registered_model: str
     backend_store: Path
+    artifact_root: Path
     tracking_uri: str | None
 
     def resolve_tracking_uri(self) -> str:
@@ -132,11 +134,17 @@ class PromotionConfig:
     alpha: float
     bootstrap_resamples: int
     min_holdout_rows: int
+    max_artifact_mb: float
+    mae_reproduction_tolerance_pln: float
 
     def __post_init__(self) -> None:
         _require_positive(self.min_mae_improvement_pln, "promotion.min_mae_improvement_pln")
+        _require_positive(self.max_artifact_mb, "promotion.max_artifact_mb")
         _require_positive(self.bootstrap_resamples, "promotion.bootstrap_resamples")
         _require_positive(self.min_holdout_rows, "promotion.min_holdout_rows")
+        _require_positive(
+            self.mae_reproduction_tolerance_pln, "promotion.mae_reproduction_tolerance_pln"
+        )
         if not 0.0 < self.alpha < 1.0:
             raise ConfigError(f"promotion.alpha must be in (0, 1), got {self.alpha}")
 
@@ -224,8 +232,12 @@ def load(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
         ),
         mlflow=MlflowConfig(
             experiment=str(_key(mlflow_section, "mlflow", "experiment")),
+            registered_model=str(_key(mlflow_section, "mlflow", "registered_model")),
             backend_store=_resolve(
                 root, _key(mlflow_section, "mlflow", "backend_store"), "mlflow.backend_store"
+            ),
+            artifact_root=_resolve(
+                root, _key(mlflow_section, "mlflow", "artifact_root"), "mlflow.artifact_root"
             ),
             tracking_uri=_key(mlflow_section, "mlflow", "tracking_uri"),
         ),
@@ -246,5 +258,9 @@ def load(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
             alpha=float(_key(promotion_section, "promotion", "alpha")),
             bootstrap_resamples=int(_key(promotion_section, "promotion", "bootstrap_resamples")),
             min_holdout_rows=int(_key(promotion_section, "promotion", "min_holdout_rows")),
+            max_artifact_mb=float(_key(promotion_section, "promotion", "max_artifact_mb")),
+            mae_reproduction_tolerance_pln=float(
+                _key(promotion_section, "promotion", "mae_reproduction_tolerance_pln")
+            ),
         ),
     )

@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import yaml
 
 from mlops_car_price.config import DEFAULT_CONFIG_PATH, Config
 from mlops_car_price.config import load as load_config
@@ -76,3 +77,22 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     # MLflow resolves its default artifact root against the working directory.
     monkeypatch.chdir(tmp_path)
     return config
+
+
+@pytest.fixture
+def reconfigure():
+    """Rewrite one section of a temporary project's config and reload it.
+
+    Thresholds sized for 118k real rows (a 5 000-row minimum holdout, say) would reject
+    everything on a 600-row synthetic frame; tests state the value they depend on instead
+    of quietly working around it.
+    """
+
+    def apply(config: Config, section: str, **values) -> Config:
+        path = config.root / "configs" / "config.yaml"
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw[section].update(values)
+        path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+        return load_config(path)
+
+    return apply
