@@ -18,9 +18,11 @@ import yaml
 from mlops_car_price.config import DEFAULT_CONFIG_PATH, Config
 from mlops_car_price.config import load as load_config
 
-# Kept well above the 5 folds the target encoder cross-fits with, and large enough that a
-# 20% holdout is still a meaningful frame.
-SYNTHETIC_ROWS = 600
+# Large enough that a weekly snapshot can be a small fraction of the stream reserve, the
+# way it is on the real dataset (2 000 rows drawn from 23 573). Bootstrapping a snapshot
+# that is a large share of the pool duplicates rows heavily, which inflates measured drift
+# far past anything the real stream produces - a fixture artefact that reads as a bug.
+SYNTHETIC_ROWS = 6_000
 
 _MARKS = ("opel", "audi", "bmw", "ford", "volkswagen")
 _FUELS = ("Gasoline", "Diesel", "Hybrid", "Electric", "LPG")

@@ -61,7 +61,9 @@ class PathsConfig:
 
     raw_csv: Path
     processed_dir: Path
+    snapshots_dir: Path
     models_dir: Path
+    reports_dir: Path
 
     @property
     def manifest(self) -> Path:
@@ -108,6 +110,16 @@ class TrainingConfig:
 
 
 @dataclass(frozen=True)
+class ReplayConfig:
+    """How the simulated production stream is drawn."""
+
+    snapshot_rows: int
+
+    def __post_init__(self) -> None:
+        _require_positive(self.snapshot_rows, "replay.snapshot_rows")
+
+
+@dataclass(frozen=True)
 class DriftConfig:
     """Thresholds that turn drift metrics into an alert."""
 
@@ -115,11 +127,26 @@ class DriftConfig:
     wasserstein_threshold: float
     ks_p_value_threshold: float
     min_snapshot_rows: int
+    max_missing_rate_increase: float
+    max_mae_increase_pct: float
+    calibration_resamples: int
+    calibration_quantile: float
 
     def __post_init__(self) -> None:
+        if self.calibration_resamples < 0:
+            raise ConfigError(
+                f"drift.calibration_resamples must be zero or positive, "
+                f"got {self.calibration_resamples}"
+            )
+        if not 0.0 < self.calibration_quantile < 1.0:
+            raise ConfigError(
+                f"drift.calibration_quantile must be in (0, 1), got {self.calibration_quantile}"
+            )
         _require_positive(self.psi_threshold, "drift.psi_threshold")
         _require_positive(self.wasserstein_threshold, "drift.wasserstein_threshold")
         _require_positive(self.min_snapshot_rows, "drift.min_snapshot_rows")
+        _require_positive(self.max_missing_rate_increase, "drift.max_missing_rate_increase")
+        _require_positive(self.max_mae_increase_pct, "drift.max_mae_increase_pct")
         if not 0.0 < self.ks_p_value_threshold < 1.0:
             raise ConfigError(
                 f"drift.ks_p_value_threshold must be in (0, 1), got {self.ks_p_value_threshold}"
@@ -159,6 +186,7 @@ class Config:
     splits: SplitConfig
     mlflow: MlflowConfig
     training: TrainingConfig
+    replay: ReplayConfig
     drift: DriftConfig
     promotion: PromotionConfig
 
@@ -207,6 +235,7 @@ def load(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
     splits_section = _section(raw, "splits")
     mlflow_section = _section(raw, "mlflow")
     training_section = _section(raw, "training")
+    replay_section = _section(raw, "replay")
     drift_section = _section(raw, "drift")
     promotion_section = _section(raw, "promotion")
 
@@ -221,8 +250,14 @@ def load(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
             processed_dir=_resolve(
                 root, _key(paths_section, "paths", "processed_dir"), "paths.processed_dir"
             ),
+            snapshots_dir=_resolve(
+                root, _key(paths_section, "paths", "snapshots_dir"), "paths.snapshots_dir"
+            ),
             models_dir=_resolve(
                 root, _key(paths_section, "paths", "models_dir"), "paths.models_dir"
+            ),
+            reports_dir=_resolve(
+                root, _key(paths_section, "paths", "reports_dir"), "paths.reports_dir"
             ),
         ),
         splits=SplitConfig(
@@ -245,11 +280,20 @@ def load(path: Path | str = DEFAULT_CONFIG_PATH) -> Config:
             default_model=str(_key(training_section, "training", "default_model")),
             sample_rows=_key(training_section, "training", "sample_rows"),
         ),
+        replay=ReplayConfig(
+            snapshot_rows=int(_key(replay_section, "replay", "snapshot_rows")),
+        ),
         drift=DriftConfig(
             psi_threshold=float(_key(drift_section, "drift", "psi_threshold")),
             wasserstein_threshold=float(_key(drift_section, "drift", "wasserstein_threshold")),
             ks_p_value_threshold=float(_key(drift_section, "drift", "ks_p_value_threshold")),
             min_snapshot_rows=int(_key(drift_section, "drift", "min_snapshot_rows")),
+            max_missing_rate_increase=float(
+                _key(drift_section, "drift", "max_missing_rate_increase")
+            ),
+            max_mae_increase_pct=float(_key(drift_section, "drift", "max_mae_increase_pct")),
+            calibration_resamples=int(_key(drift_section, "drift", "calibration_resamples")),
+            calibration_quantile=float(_key(drift_section, "drift", "calibration_quantile")),
         ),
         promotion=PromotionConfig(
             min_mae_improvement_pln=float(

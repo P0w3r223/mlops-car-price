@@ -19,6 +19,10 @@ src/mlops_car_price/
   dataset.py                 # three-way split + content manifest (the data version)
   tracking.py                # MLflow wiring: tracking URI, experiment, client
   registry.py                # model versions + champion/challenger aliases
+  replay.py                  # weekly "production" snapshots + named drift scenarios
+  drift/metrics.py           # PSI, Wasserstein, KS, chi-square, missing rates
+  drift/detector.py          # thresholds + calibration -> a verdict with reasons
+  drift/report.py            # the verdict as markdown
   training/train.py          # the only way a model gets trained; one run = one record
   training/promote.py        # the gate: score, judge, move the alias, record why
 examples/                    # scripts that regenerate the README's tables
@@ -46,6 +50,9 @@ kaggle datasets download -d aleksandrglotov/car-prices-poland -p data/raw --unzi
 python -m mlops_car_price.dataset build            # splits + manifest
 python -m mlops_car_price.training.train --model LightGBM --register
 python -m mlops_car_price.training.promote --version 1 [--dry-run]
+python -m mlops_car_price.replay --week 1 --scenario price_shock
+python -m mlops_car_price.drift.detector --week 1 --scenario price_shock
+python examples/drift_scenarios.py                 # regenerate the scenario table
 python examples/artifact_cost.py                   # regenerate the cost table
 mlflow ui --backend-store-uri sqlite:///mlflow.db  # inspect runs and versions
 pytest                                             # full suite
@@ -72,8 +79,15 @@ ruff check .                                       # lint
   rows. Never retrain on it, never resample it, never "refresh" it.
 - **`stream_pool` is never trained on.** It exists to become production traffic; using it
   for training would make drift detection self-fulfilling.
-- **Drift gates run on effect size, not p-values.** At 100k rows a KS test rejects for
-  shifts far too small to matter; the p-value is a diagnostic, PSI and Wasserstein decide.
+- **Drift gates run on effect size, not p-values.** At these sample sizes a KS test rejects
+  for shifts far too small to matter; the p-value is a diagnostic, PSI and Wasserstein decide.
+- **A threshold has to beat the noise floor too.** PSI's null distribution depends on sample
+  size and category count, so a column is flagged only when it clears both the configured
+  threshold and what it scores against itself at that sample size (ADR 0006). Never silence
+  a false alarm by raising the fixed threshold - measure the floor instead.
+- **`stream_pool` is the only source of snapshots**, and a scenario is a parameterised
+  transformation applied after the draw. Adding a scenario means adding a way for data to
+  break, not a way to make a detector look good.
 - **A challenger is promoted only on evidence**: paired bootstrap CI of the MAE difference
   excludes zero, the point improvement clears the configured margin, and the holdout is
   large enough. Champion/challenger comparisons are paired — the two models score the same
