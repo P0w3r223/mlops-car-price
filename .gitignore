@@ -19,3 +19,6 @@ mlartifacts/
 # Tooling caches
 .pytest_cache/
 .ruff_cache/
+
+# Lokalny indeks CodeGraph (graf kodu per maszyna, odbudowywalny przez `codegraph init`)
+.codegraph/
