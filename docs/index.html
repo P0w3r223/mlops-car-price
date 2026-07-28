@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mlops-car-price — MLOps for the used-car price model</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font: 16px/1.55 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+         -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+         max-width: 820px; margin: 0 auto; padding: 32px 20px 56px; color: #1c2430; }
+  h1 { margin-bottom: 2px; font-weight: 700; letter-spacing: -0.01em; } .sub { color: #667085; margin-top: 0; }
+  h2 { font-weight: 600; margin-top: 0; }
+  .card { border: 1px solid #e3e7ee; border-radius: 12px; padding: 18px 20px; margin: 18px 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid #eef1f6; }
+  th:first-child, td:first-child { text-align: left; }
+  code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  img { max-width: 100%; } footer { color: #667085; font-size: 0.85rem; margin-top: 24px; }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>
+<h1>mlops-car-price</h1>
+<p class="sub">An MLOps layer around the used-car price model (project A3): versioned data,
+MLflow tracking and registry, a measured drift detector, and evidence-based
+champion/challenger promotion.</p>
+
+<div class="card">
+  <h2>What a model costs to operate</h2>
+  <p>Accuracy is only one axis of a production decision. Each candidate is measured on a frozen
+  holdout split alongside its operational cost — artifact size, prediction latency, and batch
+  throughput — so the trade-off is explicit rather than assumed.</p>
+  <table>
+    <tr><th>Model</th><th>Holdout MAE</th><th>Artifact</th><th>Predict p50</th><th>Batch throughput</th></tr>
+    <tr><td>Ridge</td><td>15,422 PLN</td><td>0.0 MB</td><td>5.1 ms</td><td>728k rows/s</td></tr>
+    <tr><td>LightGBM</td><td>9,278 PLN</td><td>3.3 MB</td><td>12.9 ms</td><td>119k rows/s</td></tr>
+    <tr><td>RandomForest</td><td><strong>8,908 PLN</strong></td><td>338.5 MB</td><td>47.1 ms</td><td>148k rows/s</td></tr>
+  </table>
+  <p class="sub">The random forest achieves the lowest error but ships a 338&nbsp;MB artifact and the
+  slowest single prediction; LightGBM reaches within a few percent of that error at roughly one
+  hundredth of the size — the kind of trade-off a registry should record, not hide.</p>
+</div>
+
+<div class="card">
+  <h2>Watching the model age</h2>
+  <p>Weekly production snapshots are replayed against six scenarios. The detector is not trusted on
+  faith: it is itself measured for false alarms and detection power, and its population-stability
+  thresholds are calibrated on the project's own data rather than borrowed from the textbook 0.2
+  rule, which does not hold here.</p>
+  <table>
+    <tr><th>Scenario</th><th>What changes</th><th>MAE change</th><th>Alert</th></tr>
+    <tr><td>stable</td><td>no change (control)</td><td>−0.9%</td><td>no</td></tr>
+    <tr><td>price_shock</td><td>prices inflate, features unchanged</td><td><strong>+135.2%</strong></td><td>yes</td></tr>
+    <tr><td>fuel_mix_shift</td><td>more electric and hybrid cars</td><td>+2.1%</td><td>yes</td></tr>
+    <tr><td>mileage_shift</td><td>higher mileage across the week</td><td>+24.5%</td><td>yes</td></tr>
+    <tr><td>unseen_makes</td><td>makes absent from training</td><td>+7.5%</td><td>yes</td></tr>
+    <tr><td>missing_engine_volume</td><td>engine volume arrives empty</td><td>+26.1%</td><td>yes</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h2>How a model reaches production</h2>
+  <p>A challenger replaces the champion only when the improvement is shown to be real rather than
+  fortunate. The decision is made by a paired bootstrap on the frozen holdout: a small nominal gain
+  is promoted only if its confidence interval clears zero. The winner is registered in MLflow and
+  served through a stable <code>champion</code> alias, so deployment follows evidence, not a single
+  lucky evaluation.</p>
+</div>
+
+<div class="card">
+  <h2>Overview</h2>
+  <p>mlops-car-price keeps the A3 model alive: reproducible data versioning, MLflow experiment
+  tracking and a model registry, a drift monitor with quantified error rates, bootstrap-based
+  promotion, and an API that serves the current champion. The engineering decisions are recorded as
+  ADRs in the repository.</p>
+</div>
+
+<footer>
+  Portfolio project P1 · <a href="https://github.com/P0w3r223/mlops-car-price">source on GitHub</a> ·
+  prepared 2026-07-28
+</footer>
+</body>
+</html>
