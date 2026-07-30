@@ -22,3 +22,5 @@ mlartifacts/
 
 # Lokalny indeks CodeGraph (graf kodu per maszyna, odbudowywalny przez `codegraph init`)
 .codegraph/
+# Added by code-review-graph
+.code-review-graph/
