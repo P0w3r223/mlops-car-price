@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 Status: accepted
-Author: P0w3r223 + Claude
+Author: P0w3r223
 Related to: [car-price-ml](https://github.com/P0w3r223/car-price-ml) tag `v0.1.0`
 
 ---
