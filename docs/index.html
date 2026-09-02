@@ -16,6 +16,12 @@
   .card { border: 1px solid #e3e7ee; border-radius: 12px; padding: 18px 20px; margin: 18px 0; }
   table { border-collapse: collapse; width: 100%; }
   th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid #eef1f6; }
+  /* Five columns do not fit a phone: at a 375px viewport these tables measured 474px and
+     450px and dragged the whole page 140px wider than the screen, so the prose scrolled
+     sideways with them. Wrapped, only the table moves. Deliberately without nowrap on the
+     cells — the scenario table has a sentence in one column, and holding it on one line
+     measured 40% wider again for nothing. */
+  .tablewrap { overflow-x: auto; }
   th:first-child, td:first-child { text-align: left; }
   code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
   img { max-width: 100%; } footer { color: #667085; font-size: 0.85rem; margin-top: 24px; }
@@ -33,12 +39,14 @@ champion/challenger promotion.</p>
   <p>Accuracy is only one axis of a production decision. Each candidate is measured on a frozen
   holdout split alongside its operational cost — artifact size, prediction latency, and batch
   throughput — so the trade-off is explicit rather than assumed.</p>
+  <div class="tablewrap">
   <table>
     <tr><th>Model</th><th>Holdout MAE</th><th>Artifact</th><th>Predict p50</th><th>Batch throughput</th></tr>
     <tr><td>Ridge</td><td>15,422 PLN</td><td>0.0 MB</td><td>5.1 ms</td><td>728k rows/s</td></tr>
     <tr><td>LightGBM</td><td>9,278 PLN</td><td>3.3 MB</td><td>12.9 ms</td><td>119k rows/s</td></tr>
     <tr><td>RandomForest</td><td><strong>8,908 PLN</strong></td><td>338.5 MB</td><td>47.1 ms</td><td>148k rows/s</td></tr>
   </table>
+  </div>
   <p class="sub">The random forest achieves the lowest error but ships a 338&nbsp;MB artifact and the
   slowest single prediction; LightGBM reaches within a few percent of that error at roughly one
   hundredth of the size — the kind of trade-off a registry should record, not hide.</p>
@@ -50,6 +58,7 @@ champion/challenger promotion.</p>
   faith: it is itself measured for false alarms and detection power, and its population-stability
   thresholds are calibrated on the project's own data rather than borrowed from the textbook 0.2
   rule, which does not hold here.</p>
+  <div class="tablewrap">
   <table>
     <tr><th>Scenario</th><th>What changes</th><th>MAE change</th><th>Alert</th></tr>
     <tr><td>stable</td><td>no change (control)</td><td>−0.9%</td><td>no</td></tr>
@@ -59,6 +68,7 @@ champion/challenger promotion.</p>
     <tr><td>unseen_makes</td><td>makes absent from training</td><td>+7.5%</td><td>yes</td></tr>
     <tr><td>missing_engine_volume</td><td>engine volume arrives empty</td><td>+26.1%</td><td>yes</td></tr>
   </table>
+  </div>
 </div>
 
 <div class="card">
