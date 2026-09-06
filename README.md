@@ -95,9 +95,9 @@ Accuracy is one column. Trained on `train_initial`, scored on the frozen holdout
 
 | Model | Holdout MAE | Train | Artifact | Load | Predict p50 | Predict p95 | Batch | Registry / year |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Ridge | 15 422 PLN | 0.1 s | 0.0 MB | 0.00 s | 5.1 ms | 6.1 ms | 728k rows/s | 0.0 GB |
-| LightGBM | 9 278 PLN | 1.7 s | 3.3 MB | 0.03 s | 12.9 ms | 13.7 ms | 119k rows/s | 0.2 GB |
-| RandomForest | 8 908 PLN | 7.8 s | 338.5 MB | 0.44 s | 47.1 ms | 68.2 ms | 148k rows/s | 17.2 GB |
+| Ridge | 15 422 PLN | 0.1 s | 0.0 MB | 0.00 s | 5.1 ms | 6.1 ms | 727 554 rows/s | 0.0 GB |
+| LightGBM | 9 278 PLN | 1.7 s | 3.3 MB | 0.03 s | 12.9 ms | 13.7 ms | 118 993 rows/s | 0.2 GB |
+| RandomForest | 8 908 PLN | 7.8 s | 338.5 MB | 0.44 s | 47.1 ms | 68.2 ms | 148 049 rows/s | 17.2 GB |
 
 RandomForest is 370 PLN (4.0%) better and costs 103× the storage, 5× the p95 request
 latency and 17.2 GB of registry a year at one retraining a week. So the deployment budget
@@ -130,7 +130,7 @@ Two rows carry the argument for paying for all three monitors:
 
 - **`price_shock`** moves the target and nothing else. Every feature is untouched, so feature
   drift is silent; the inputs are unchanged, so the predictions are identical and prediction
-  drift is silent too. Only the realised error sees it — **+135%** — and in a real system that
+  drift is silent too. Only the realised error sees it — **+135.2%** — and in a real system that
   signal arrives last, because labels are late.
 - **`fuel_mix_shift`** is the mirror image: five features flagged, predictions flagged, and the
   model is **2.1% worse**. Drift is not degradation. A monitor that only knows how to say
@@ -252,7 +252,7 @@ written a second time here.
 
 So the RandomForest advantage **is real** — and it is still refused, by the deployment budget.
 The system now states an explicit trade: a genuine 4% accuracy gain, declined because a
-338 MB artifact cannot be retrained weekly and kept in a registry.
+338.5 MB artifact cannot be retrained weekly and kept in a registry.
 
 ## The loop, and how often it should do nothing
 
@@ -269,7 +269,9 @@ and hands the gate a coin flip to judge:
 ```
 
 A drifted week trains a challenger on the original data **plus** the weeks that have arrived,
-registers it as a candidate, and lets the gate rule:
+registers it as a candidate, and lets the gate rule. **The transcript below is illustrative** —
+its shape is what the loop prints, but unlike every table on this page its figures come from a
+run that was not committed, so they are not quotable and are not quoted anywhere else:
 
 ```
 [retrain] week 11 / mileage_shift: DRIFT
@@ -313,8 +315,9 @@ environment looks like, not a failure. The tracking server owns the artifacts
 (`--serve-artifacts`), so the API fetches the champion over HTTP and shares no filesystem
 with it.
 
-The containerised run reproduces the host exactly: same 9 278.0 PLN holdout MAE, same
-35 772.63 PLN valuation for the same car.
+The containerised run reproduces the host exactly: the same 9 278 PLN holdout MAE that
+`reports/artifact_cost.md` prints, and the same valuation for the same car. (The valuation is a
+figure of that run rather than of a committed artifact, so it is described rather than printed.)
 
 ## Run it locally
 
