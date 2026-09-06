@@ -21,7 +21,7 @@
      sideways with them. Wrapped, only the table moves. Deliberately without nowrap on the
      cells — the scenario table has a sentence in one column, and holding it on one line
      measured 40% wider again for nothing. */
-  .tablewrap { overflow-x: auto; }
+  .table-wrap { overflow-x: auto; }
   th:first-child, td:first-child { text-align: left; }
   code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
   img { max-width: 100%; } footer { color: #667085; font-size: 0.85rem; margin-top: 24px; }
@@ -39,7 +39,7 @@ champion/challenger promotion.</p>
   <p>Accuracy is only one axis of a production decision. Each candidate is measured on a frozen
   holdout split alongside its operational cost — artifact size, prediction latency, and batch
   throughput — so the trade-off is explicit rather than assumed.</p>
-  <div class="tablewrap">
+  <div class="table-wrap">
   <table>
     <tr><th>Model</th><th>Holdout MAE</th><th>Artifact</th><th>Predict p50</th><th>Batch throughput</th></tr>
     <tr><td>Ridge</td><td>15,422 PLN</td><td>0.0 MB</td><td>5.1 ms</td><td>728k rows/s</td></tr>
@@ -58,7 +58,7 @@ champion/challenger promotion.</p>
   faith: it is itself measured for false alarms and detection power, and its population-stability
   thresholds are calibrated on the project's own data rather than borrowed from the textbook 0.2
   rule, which does not hold here.</p>
-  <div class="tablewrap">
+  <div class="table-wrap">
   <table>
     <tr><th>Scenario</th><th>What changes</th><th>MAE change</th><th>Alert</th></tr>
     <tr><td>stable</td><td>no change (control)</td><td>−0.9%</td><td>no</td></tr>
