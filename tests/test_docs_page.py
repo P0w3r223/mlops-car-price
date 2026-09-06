@@ -104,9 +104,22 @@ def _rendered_text(tally: dict[str, int] | None = None) -> str:
 _NUMBER = re.compile(r"\d[\d,.\u202f\u00a0\u2009]*\d|\d")
 
 
+def _canonical(digits: str) -> str:
+    """`0007` §5.0 names the separator, the minus sign **and the presence or absence of a
+    trailing zero** as the page's typography, so `67.90` and `67.9` are one quotation.
+
+    Only after a decimal point: `100` is not `1`. This was a real divergence rather than a
+    nicety — the test compared digit strings, so it was stricter than the sentence it cites,
+    and it reported a legal typographic form as an unsourced figure.
+    """
+    if "." in digits:
+        digits = digits.rstrip("0").rstrip(".")
+    return digits or "0"
+
+
 def _figures(text: str) -> set[str]:
     """Every number, reduced to its digits and decimal point."""
-    return {token.translate(_SEPARATORS) for token in re.findall(_NUMBER, text)}
+    return {_canonical(token.translate(_SEPARATORS)) for token in re.findall(_NUMBER, text)}
 
 
 def _cell(table: str, row: str, column: str) -> str:
@@ -273,3 +286,13 @@ def test_the_page_names_its_own_measurement_and_points_at_the_sibling():
         f"the page prints {sorted(foreign)}, which are car-price-ml's cells and not this "
         "repository's — clause 9 asks for a bridge, not for the other page's figures"
     )
+
+
+def test_a_trailing_zero_is_typography_and_not_a_different_figure():
+    """`0007` §5.0's own sentence, made executable. The rule and its implementation disagreed:
+    the spec calls a trailing zero typography and this function compared digit strings, so
+    `67.90` quoted as `67.9` read as a figure no artifact prints."""
+    assert _figures("67.90") == _figures("67.9")
+    assert _figures("4.0 %") == _figures("4 %")
+    assert _figures("0.00") == _figures("0")
+    assert _figures("100") != _figures("1"), "only a decimal tail is typography"
