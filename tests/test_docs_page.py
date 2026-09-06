@@ -1,4 +1,4 @@
-"""The published page — and the two rules the index checker structurally cannot carry.
+"""The published page — and the rules the index checker structurally cannot carry.
 
 `ADR-0004` (in the private index) puts one checker over all twelve published surfaces and
 assertions in the repositories that have a page test. This repository had none, and S4 needs
@@ -37,48 +37,101 @@ ARTIFACTS = (Path("reports/artifact_cost.md"), Path("reports/detector_evaluation
 #: `0007` §5.0: a quotation is a digit sequence. The group separator is the page's typography —
 #: clause 8 makes the page write `U+202F` where the artifact writes a comma — so both sides are
 #: reduced to digits before comparing, and neither side's separator is part of the claim.
-#: The separators a page may write where an artifact writes a comma.
 _SEP_CHARS = "\u202f\u00a0\u2009 "
 _SEPARATORS = str.maketrans(dict.fromkeys("," + _SEP_CHARS, ""))
 
 #: Numbers a reader sees that are not results, cut out of the rendered text before tokenising
 #: rather than excused afterwards. Each is a *shape* with a reason, never a value: a list of
 #: allowed values goes stale in silence, which is what `0007` §5.0 sentence 2 is about.
+#:
+#: **A year is not on this list.** The obvious shape was, until the liveness test below started
+#: asking where each exemption fires: it consumed nothing, because the only year a reader meets
+#: on this page sits inside the build date, which the shape above it already removes. It was
+#: pure widening — a four-digit corruption of any cell, `15 422` retyped as `2019`, was accepted
+#: by it in silence, and is now caught.
 _NOT_A_RESULT = (
     (r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", "a date is a fact about a run, not a cell of one"),
-    (r"\b(?:19|20)\d{2}\b", "years"),
     (r"\b[AP]\d\b", "the portfolio's own ranking codes, A3 and P1"),
 )
+
+#: The `content` of the three clause-5 properties that are **prose a reader reads** — a search
+#: snippet and a social card. They carry figures, so the provenance rule reaches them; stripping
+#: tags alone drops them along with the tag, which is what left `og:description`'s `338.5 MB`
+#: unguarded and free to go stale behind every edit of the body.
+#:
+#: `og:url`, `og:type` and `twitter:card` are deliberately **not** here. They are machine values,
+#: and reading them as claims makes the account handle's `223` a figure the page has to source.
+_META_CONTENT = re.compile(
+    r'<meta\s+(?:name|property)="(?:description|og:title|og:description)"\s+content="([^"]*)"',
+    re.IGNORECASE)
 
 
 def _artifact_text() -> str:
     return "\n".join((ROOT / name).read_text(encoding="utf-8") for name in ARTIFACTS)
 
 
-def _rendered_text() -> str:
-    """What a reader sees: no stylesheet, no comments, no attributes, no tags.
+def _rendered_text(tally: dict[str, int] | None = None) -> str:
+    """What a reader sees — the body, plus the published metadata a reader meets elsewhere.
 
     Comparing the **raw HTML** was the first attempt and it is hopeless — a URL's `223`, a
     hex literal's digits and an entity's `160` all read as claims, and the exemption list
     needed to silence them would be wider than the rule. `apply-scout`'s equivalent test
     reads rendered text for the same reason, and it is the reason.
+
+    `tally`, when given, records how often each exemption fires **at the point it is applied**.
+    That is the only place the question can be asked: by the time this function returns every
+    exempted shape has been removed, so a pattern searched against the result always reads dead
+    and a pattern searched against the raw page always reads alive.
     """
     text = re.sub(r"<(style|script)\b.*?</\1>", " ", PAGE, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<!--.*?-->", " ", text, flags=re.DOTALL)
-    text = re.sub(r"<[^>]+>", " ", text)
+    meta = " ".join(_META_CONTENT.findall(text))
+    text = re.sub(r"<[^>]+>", " ", text) + " " + meta
     text = re.sub(r"&#\d+;|&\w+;", " ", text)
     for pattern, _why in _NOT_A_RESULT:
-        text = re.sub(pattern, " ", text)
+        text, fired = re.subn(pattern, " ", text)
+        if tally is not None:
+            tally[pattern] = tally.get(pattern, 0) + fired
     return text
 
 
-_NUMBER = re.compile(r"\d[\d,.\u202f\u00a0\u2009 ]*\d|\d")
+#: A whole figure. **The plain space is not in the class**, though it is in `_SEP_CHARS`:
+#: clause 8 makes a grouped figure use `U+202F`, and admitting the ordinary space here welds two
+#: adjacent table cells into one token — `0.05 0.04` reads as `0.050.04` and matches nothing.
+#: That is the welding `0007` §8.5 records, which every earlier separator tally in this
+#: portfolio got wrong. It was live on this page rather than a hazard borrowed from the sibling:
+#: with the space admitted, a `<td>2119</td>` control welded onto its neighbour as `21190.0`.
+_NUMBER = re.compile(r"\d[\d,.\u202f\u00a0\u2009]*\d|\d")
 
 
 def _figures(text: str) -> set[str]:
     """Every number, reduced to its digits and decimal point."""
-    return {token.translate(_SEPARATORS)
-            for token in re.findall(_NUMBER, text)}
+    return {token.translate(_SEPARATORS) for token in re.findall(_NUMBER, text)}
+
+
+def _cell(table: str, row: str, column: str) -> str:
+    """One cell of a committed markdown table, addressed the way a reader would name it."""
+    lines = [line for line in table.splitlines() if line.strip().startswith("|")]
+    header = [c.strip() for c in lines[0].strip("|").split("|")]
+    assert column in header, f"no column {column!r} in {header}"
+    index = header.index(column)
+    for line in lines[2:]:
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if cells[0] == row:
+            return cells[index]
+    raise AssertionError(f"no row {row!r} in the table")
+
+
+#: Which cell each headline tile claims to be, in the order the page prints them. Clause 2 says
+#: a tile quotes *the cell it summarises*, and naming the cell is what makes that checkable —
+#: a set comparison against the whole file cannot express it, because four tiles printing one
+#: number satisfy it, and so does a tile printing its neighbour's.
+TILE_CELLS = (
+    ("RandomForest", "Holdout MAE (PLN)"),
+    ("RandomForest", "Artifact"),
+    ("LightGBM", "Holdout MAE (PLN)"),
+    ("LightGBM", "Artifact"),
+)
 
 
 def test_every_figure_the_page_prints_is_one_a_committed_artifact_prints():
@@ -89,6 +142,15 @@ def test_every_figure_the_page_prints_is_one_a_committed_artifact_prints():
     makes that a violation rather than a style, and this is the only carrier that can see it:
     the index checker reads the page and the stylesheet and has no access to `reports/`.
     """
+    # **What this cannot catch, measured rather than assumed.** The check is set membership, so
+    # it catches a figure that appears *nowhere* in the artifacts and never a figure moved to
+    # the wrong place. Swept by substituting one digit at a time: of the 22 figures this page
+    # prints, **10 have at least one corruption this test accepts** — the artifact set admits 77
+    # figures and the collisions are with short ones (`3.3` → `3.0`, `50` → `52`). Widening the
+    # sweep to two digits reaches the sharpest case: `12.9 ms` retyped as `13.0 ms` passes,
+    # because another cell prints `13.0`, and that is §5.0's exact prohibition. The tile test
+    # below is the narrower carrier and catches what this one cannot. Stated with its definition
+    # because a census whose corruption family is unstated is a number nobody can reproduce.
     unsourced = sorted(_figures(_rendered_text()) - _figures(_artifact_text()))
     assert not unsourced, (
         f"the page prints {unsourced}, which no committed artifact prints. Either the figure "
@@ -98,12 +160,21 @@ def test_every_figure_the_page_prints_is_one_a_committed_artifact_prints():
     )
 
 
-def test_the_exemptions_are_shapes_that_still_match_something():
+def test_the_exemptions_are_shapes_that_still_fire_where_they_are_applied():
     """A dead exemption is worse than none: it sits there widening the rule while covering
-    nothing, and nobody notices because the suite stays green either way."""
+    nothing, and nobody notices because the suite stays green either way.
+
+    Asked of the **pipeline**, not of the page. The first version searched the raw HTML, which
+    answers a different question and always answers yes — `2026` was still in the markup long
+    after the date exemption had eaten the only place a reader could see it, so the `years`
+    shape this file used to carry read as alive while covering nothing at all and accepting a
+    four-digit corruption of any table cell.
+    """
+    tally: dict[str, int] = {}
+    _rendered_text(tally)
     for pattern, why in _NOT_A_RESULT:
-        assert re.search(pattern, PAGE), (
-            f"the exemption for {why} matches nothing on this page, so it can only widen "
+        assert tally.get(pattern), (
+            f"the exemption for {why} fires on nothing a reader sees, so it can only widen "
             f"what the check above accepts: {pattern!r}"
         )
 
@@ -112,44 +183,63 @@ def test_each_headline_tile_quotes_the_cell_it_summarises():
     """`0007` §5 clause 2, whose binding the index checker cannot carry — it grants §5.1's
     fallback to any page with no tiles and cannot see whether an artifact could source one.
 
-    Asserted per tile against the cell, not in aggregate: four tiles all quoting the same
-    number would satisfy a set comparison and say nothing.
+    Bound to the cell, by row **and** column. Comparing each tile against every figure in the
+    file is the aggregate comparison this docstring used to claim it avoided while performing
+    it: four tiles all printing `3.3 MB` passed, and so did a tile printing its neighbour's
+    value. The caption is checked against the same row, so a tile cannot describe one model and
+    quote another.
     """
-    cost = (ROOT / "reports" / "artifact_cost.md").read_text(encoding="utf-8")
+    table = (ROOT / "reports" / "artifact_cost.md").read_text(encoding="utf-8")
     tiles = re.findall(r'<li class="kpi"><b>(.*?)</b><span>(.*?)</span>', PAGE, re.DOTALL)
-    assert len(tiles) == 4, f"clause 2 asks for the tiles a reader scans first; found {len(tiles)}"
-    for value, caption in tiles:
-        digits = _figures(value)
-        assert digits, f"the tile {caption!r} carries no figure"
-        assert digits <= _figures(cost), (
-            f"the tile {value!r} ({caption!r}) is not a cell of artifact_cost.md"
+    assert len(tiles) == len(TILE_CELLS), (
+        f"clause 2 asks for the tiles a reader scans first; found {len(tiles)}"
+    )
+    for (value, caption), (row, column) in zip(tiles, TILE_CELLS, strict=True):
+        assert row in caption, (
+            f"the tile {value!r} is bound to the {row} row and its caption {caption!r} does not "
+            "name it, so a reader cannot tell which measurement it is"
+        )
+        cell = _cell(table, row, column)
+        assert _figures(value) == _figures(cell), (
+            f"the tile {value!r} ({caption!r}) is not the {column!r} cell of the {row} row, "
+            f"which reads {cell!r}"
         )
 
 
-def test_the_separator_and_the_code_ground_are_painted_apart():
-    """The S3 defect, pinned in the repository it was loaded in.
+def test_every_ground_is_painted_with_the_role_that_names_it():
+    """The S3 defect, pinned in the repository it was loaded in — and pinned at every site.
 
     `#eef1f6` served two roles here — the table separator and `code`'s background — and a
     migration done by *value* maps both onto one token, leaves every name declared and
     resolvable, and ships a page both carriers report clean. The index checker's
-    `1 usage roles` catches the separator half; **nothing catches the `code` half**, because
-    a ground role in a ground property conforms whichever ground it names.
+    `1 usage roles` catches the separator half; **nothing catches a ground half**, because a
+    ground role in a ground property conforms whichever ground it names.
 
-    Proved by the mutation it names: setting `code`'s background to `var(--border)` turns
-    this red and leaves the checker reporting `clear`.
+    Asserted over the **whole** ground map and over **every** declaration of each selector.
+    Pinning `code` alone left `body { background: var(--surface) }` clean on both carriers, and
+    pinning the first match left a later `@media (prefers-color-scheme: dark) { code { … } }`
+    free to repaint it: CSS resolves by the last declaration and `re.search` returns the first.
     """
-    style = re.search(r"<style>(.*?)</style>", PAGE, re.DOTALL).group(1)
-    separator = re.search(r"th,\s*td\s*\{[^}]*border-bottom:[^;]*var\(--([\w-]+)\)", style)
-    ground = re.search(r"\bcode\s*\{[^}]*background:\s*var\(--([\w-]+)\)", style)
+    style = re.search(r"<style>(.*?)</style>", PAGE, re.DOTALL)
+    assert style, "the page has no inline stylesheet, so nothing below can be read"
+    css = style.group(1)
+
+    separator = re.search(r"th,\s*td\s*\{[^}]*border-bottom:[^;]*var\(--([\w-]+)\)", css)
     assert separator, "no table separator painted with a token"
-    assert ground, "no code background painted with a token"
     assert separator.group(1) == "border", (
         f"the table separator paints --{separator.group(1)}; six sibling pages write "
         "--border, and this page's own literal served that role"
     )
-    assert ground.group(1) == "surface", (
-        f"`code` paints --{ground.group(1)}; it is a ground, and --border is the edge"
-    )
+
+    for selector, role in (("body", "bg"), ("code", "surface")):
+        painted = re.findall(
+            r"(?:^|[;{}])\s*" + selector + r"\s*\{[^}]*background:\s*var\(--([\w-]+)\)",
+            css, re.MULTILINE)
+        assert painted, f"no `{selector}` background painted with a token"
+        assert set(painted) == {role}, (
+            f"`{selector}` paints {sorted(set(painted))} across {len(painted)} declaration(s); "
+            f"it is this page's {role} and every scheme has to agree on that"
+        )
 
 
 def test_the_page_names_its_own_measurement_and_points_at_the_sibling():
@@ -161,22 +251,25 @@ def test_the_page_names_its_own_measurement_and_points_at_the_sibling():
     forbids is a reader meeting both with no bridge.
 
     It also asserts the bridge carries **no figure from the other page**: those are that
-    repository's cells, not this one's, and printing them would break the provenance rule
-    above to satisfy this one.
+    repository's cells, not this one's, and printing them would break the provenance rule above
+    to satisfy this one. Read from the **rendered** text — the first version read markup, so
+    moving the whole bridge into an HTML comment satisfied it — and the foreign figures are
+    compared as digits, because listing spellings missed `8 612`, which is the separator
+    clause 8 mandates and the form `car-price-ml` publishes.
     """
-    prose = re.sub(r"<style>.*?</style>", " ", PAGE, flags=re.DOTALL)
+    prose = _rendered_text()
     assert re.search(r"frozen holdout", prose, re.IGNORECASE), (
         "the page reports an MAE without naming the split it comes from"
-    )
-    assert "github.com/P0w3r223/car-price-ml" in prose, (
-        "clause 9 asks this page to point at the other measurement, not only to name its own"
     )
     assert re.search(r"cross-validation", prose, re.IGNORECASE), (
         "the bridge names this measurement but not the sibling's, so a reader still meets "
         "two numbers and no reason they differ"
     )
-    for foreign in ("8 612", "8,612", "8 798", "8,798", "111 018", "111,018"):
-        assert foreign not in prose, (
-            f"the page prints {foreign!r}, which is car-price-ml's cell and not this "
-            "repository's — clause 9 asks for a bridge, not for the other page's figures"
-        )
+    assert "github.com/P0w3r223/car-price-ml" in PAGE, (
+        "clause 9 asks this page to point at the other measurement, not only to name its own"
+    )
+    foreign = {"8612", "8798", "111018"} & _figures(prose)
+    assert not foreign, (
+        f"the page prints {sorted(foreign)}, which are car-price-ml's cells and not this "
+        "repository's — clause 9 asks for a bridge, not for the other page's figures"
+    )
