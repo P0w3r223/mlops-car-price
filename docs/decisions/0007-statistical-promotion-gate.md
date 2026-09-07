@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 Status: accepted
-Author: P0w3r223
+Author: Piotr Cząstkiewicz
 Related to: ADR 0003, [ab-lab ADR 0005](https://github.com/P0w3r223/ab-lab/blob/main/docs/decisions/0005-paired-bootstrap.md)
 
 ---

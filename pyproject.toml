@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "MLOps layer over the used-car price model: MLflow tracking and registry, drift monitoring, champion/challenger retraining"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     # The modelling layer is not reimplemented here — it is consumed from project A3,
     # pinned to a tag so a run is reproducible against a fixed modelling version.
