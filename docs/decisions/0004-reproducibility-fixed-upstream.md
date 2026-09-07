@@ -2,7 +2,7 @@
 
 Date: 2026-07-22
 Status: accepted
-Author: P0w3r223
+Author: Piotr Cząstkiewicz
 Related to: ADR 0001, [car-price-ml#3](https://github.com/P0w3r223/car-price-ml/pull/3)
 
 ---
