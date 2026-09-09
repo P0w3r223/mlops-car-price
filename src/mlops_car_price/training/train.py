@@ -9,7 +9,7 @@ from, so any number in the README can be traced back to a run.
     python -m mlops_car_price.training.train --model LightGBM
 
 Evaluation is a single frozen holdout, not cross-validation: a promotion decision must
-compare champion and challenger on identical rows, and A3 already answers the "which model
+compare champion and challenger on identical rows, and car-price-ml already answers the "which model
 family wins offline" question with CV.
 """
 
@@ -67,7 +67,7 @@ def train_run(
     """Fit, evaluate on the frozen holdout, and record everything as one MLflow run.
 
     Args:
-        model_name: One of the A3 bake-off models; defaults to ``training.default_model``.
+        model_name: One of the car-price-ml bake-off models; defaults to ``training.default_model``.
         sample_rows: Rows drawn from ``train_initial``; defaults to ``training.sample_rows``.
         log_model_artifact: Copy the fitted model into MLflow's artifact store. Off by
             default — a RandomForest on this dataset serialises to hundreds of megabytes,

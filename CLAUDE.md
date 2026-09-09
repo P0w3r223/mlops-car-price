@@ -4,8 +4,8 @@ Guidance for Claude Code (and any contributor) working in this repo.
 
 ## What this project is
 
-Portfolio project **P1**. The MLOps layer around the used-car price model from project
-A3: versioned data, recorded training runs, a model registry with champion/challenger
+Portfolio project **P1**. The MLOps layer around the used-car price model from
+`car-price-ml`: versioned data, recorded training runs, a model registry with champion/challenger
 aliases, drift monitoring on simulated production traffic, and a promotion rule that
 decides when a challenger may take over. The claim is not "I trained a model" but
 "I maintain a model that ages on data — and I have a process for it".
@@ -44,9 +44,9 @@ version** is an artifact entered into the registry, an **alias** (`champion`,
 `challenger`) is a movable label saying which version serves. Registering is proposing;
 moving the `champion` alias is deploying.
 
-The modelling code is **not** reimplemented here. `car_price_ml` (project A3, pinned to
+The modelling code is **not** reimplemented here. `car_price_ml` (pinned to
 tag `v0.1.1`) supplies cleaning, feature engineering, the model bake-off and the metrics,
-and `ab_lab` (project P2, pinned to `v0.2.0`) supplies `paired_bootstrap` to the promotion
+and `ab_lab` (pinned to `v0.2.0`) supplies `paired_bootstrap` to the promotion
 gate — which is what the "never swap in `bootstrap_diff`" rule below is about. This repo owns
 everything *around* the model, and adds to neither upstream by copying from it.
 
@@ -75,7 +75,7 @@ ruff check .                                       # lint
 
 - **Typed, documented, no magic numbers.** Anything tunable lives in `config.yaml` and
   arrives through `config.load()`; a bad value fails at load time, naming the key.
-- **Never rely on A3's default paths.** `car_price_ml.config.PROJECT_ROOT` resolves
+- **Never rely on car-price-ml's default paths.** `car_price_ml.config.PROJECT_ROOT` resolves
   inside `site-packages` once the package is installed. Always pass the path explicitly
   (`data.load_raw(path=…)`, `model.save_model(…, models_dir=…)`). A regression test
   guards this, because the failure mode is silent — wrong data, not a crash.
@@ -113,7 +113,7 @@ ruff check .                                       # lint
   model reference the API may contain; a promotion plus a restart is the whole deployment.
 - **Configuration belongs to the deployment, not the package.** `config.load()` resolves the
   env var, then the working directory, then the source tree - `PACKAGE_ROOT` points inside
-  site-packages once installed, which is the same trap ADR 0001 documents for A3.
+  site-packages once installed, which is the same trap ADR 0001 documents for car-price-ml.
 - **Refusing is the normal outcome.** A retraining loop whose challengers are always promoted
   is a deployment script, not a quality bar. Do not tune the gate until it says yes.
 - **The deployment budget is a promotion rule, not advice.** A candidate over
@@ -123,7 +123,7 @@ ruff check .                                       # lint
   reproduces the MAE its own run recorded, nothing downstream is trustworthy — refuse.
 - **Reproducibility is a claim to be tested.** Same seed and same data must give the same
   number; when that broke it was a real bug in the modelling layer, fixed there (ADR 0004).
-- **The A3 methodology still applies** where this repo touches modelling: log-price target
+- **The car-price-ml methodology still applies** where this repo touches modelling: log-price target
   inverted before metrics, `age` instead of raw `year`, out-of-fold target encoding.
 
 ## Working rules
