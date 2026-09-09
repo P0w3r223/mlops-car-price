@@ -89,7 +89,7 @@
 <h1>The most accurate model is the one this layer refuses to deploy</h1>
 <p class="sub">The random forest reaches the lowest error on the frozen holdout and ships a
 338.5 MB artifact against a declared 50.0 MB budget, so the layer promotes LightGBM instead.
-An MLOps layer around the used-car price model (project A3): versioned data, MLflow tracking
+An MLOps layer around the used-car price model (car-price-ml): versioned data, MLflow tracking
 and registry, a drift detector measured for its own false alarms, and promotion that weighs
 operating cost against error.</p>
 
@@ -156,14 +156,14 @@ operating cost against error.</p>
 
 <div class="card">
   <h2>Overview</h2>
-  <p>mlops-car-price keeps the A3 model alive: reproducible data versioning, MLflow experiment
+  <p>mlops-car-price keeps the car-price-ml model alive: reproducible data versioning, MLflow experiment
   tracking and a model registry, a drift monitor with quantified error rates, bootstrap-based
   promotion, and an API that serves the current champion. The engineering decisions are recorded as
   ADRs in the repository.</p>
 </div>
 
 <footer>
-  Portfolio project P1 · <a href="https://github.com/P0w3r223/mlops-car-price">source on GitHub</a> ·
+  Portfolio project · <a href="https://github.com/P0w3r223/mlops-car-price">source on GitHub</a> ·
   <a href="https://github.com/P0w3r223">the rest of the portfolio</a> ·
   prepared 2026-07-28
 </footer>
