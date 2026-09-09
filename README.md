@@ -76,7 +76,7 @@ flowchart LR
 ### The data split
 
 The source is the open Kaggle dataset `aleksandrglotov/car-prices-poland` (CC0). It is
-cleaned by A3's own code and split once, deterministically:
+cleaned by car-price-ml's own code and split once, deterministically:
 
 | Split | Rows | Purpose |
 |---|---:|---|
@@ -206,7 +206,7 @@ RandomForest, random_state=42: 8841.2 PLN, then 8914.1 PLN
 LightGBM,     random_state=42: 9331.0 / 9266.7 / 9278.2 PLN
 ```
 
-The estimators were seeded; the **preprocessing was not**. A3's target encoder shuffled its
+The estimators were seeded; the **preprocessing was not**. car-price-ml's target encoder shuffled its
 internal cross-fitting folds from an unseeded RNG, so identical data produced different
 encodings. A ~70 PLN spread is nothing next to a 9 000 PLN MAE — and everything next to a
 100 PLN promotion margin. The gate would have been reading noise part of the time.
@@ -335,11 +335,11 @@ Then `mlflow ui --backend-store-uri sqlite:///mlflow.db` to inspect runs and ver
 Full context in [`docs/decisions/`](docs/decisions/).
 
 - **[ADR 0001](docs/decisions/0001-consume-car-price-ml-as-a-package.md) — the modelling
-  code is a dependency, not a copy.** A3 is installed from a git tag, so a run is
+  code is a dependency, not a copy.** car-price-ml is installed from a git tag, so a run is
   reproducible against a fixed modelling version and there is exactly one definition of
   "clean the data".
 - **[ADR 0002](docs/decisions/0002-replay-instead-of-a-scraper.md) — production traffic is
-  a replay, not a scraper.** A3 rejected scraping the Polish listing sites (database
+  a replay, not a scraper.** car-price-ml rejected scraping the Polish listing sites (database
   *sui generis* right, ToS), and that decision does not expire because a later project
   would find fresh data convenient.
 - **[ADR 0003](docs/decisions/0003-lightgbm-as-the-production-model.md) — LightGBM serves,
@@ -347,7 +347,7 @@ Full context in [`docs/decisions/`](docs/decisions/).
   maintenance loop can carry; 0.23 pp of MAPE bought two orders of magnitude on every
   operation the loop performs.
 - **[ADR 0004](docs/decisions/0004-reproducibility-fixed-upstream.md) — the determinism bug
-  was fixed in A3, not patched around here.** Duplicating the preprocessing would have
+  was fixed in car-price-ml, not patched around here.** Duplicating the preprocessing would have
   defeated the point of consuming it as a package.
 - **[ADR 0005](docs/decisions/0005-own-drift-metrics-evidently-as-oracle.md) — the drift
   metrics are implemented here; Evidently referees them offline.** It costs 41 transitive
@@ -378,7 +378,7 @@ Written after building it, not before.
 - **The source dataset has no listing date.** "Weeks" are a replay construct; the split is
   random, not chronological, so genuine temporal drift and seasonality are out of reach.
 - **Prices are historical** (dataset vintage ~2021) and `age` comes from a fixed reference
-  year inherited from A3, so the absolute złoty figures are not today's market.
+  year inherited from car-price-ml, so the absolute złoty figures are not today's market.
 - **Nothing runs on a schedule.** The loop works end to end locally and in containers, but a
   weekly CI run would need the Kaggle source, which is not in the repository. A green badge on
   fabricated data would be worse than no badge ([issue #10](https://github.com/P0w3r223/mlops-car-price/issues/10)).

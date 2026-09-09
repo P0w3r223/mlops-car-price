@@ -51,7 +51,6 @@ _SEPARATORS = str.maketrans(dict.fromkeys("," + _SEP_CHARS, ""))
 #: by it in silence, and is now caught.
 _NOT_A_RESULT = (
     (r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", "a date is a fact about a run, not a cell of one"),
-    (r"\b[AP]\d\b", "the portfolio's own ranking codes, A3 and P1"),
 )
 
 #: The `content` of the three clause-5 properties that are **prose a reader reads** — a search
