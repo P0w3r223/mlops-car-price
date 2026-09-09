@@ -1,6 +1,6 @@
 """Deterministic three-way split of the source dataset, with a content manifest.
 
-The source is the same open Kaggle dataset the A3 model was built on, cleaned by the
+The source is the same open Kaggle dataset the car-price-ml model was built on, cleaned by the
 *same* code (``car_price_ml.data``) so the MLOps layer never grows its own second
 definition of "clean". The split has three purposes:
 
@@ -80,7 +80,7 @@ def split_path(name: str, config: Config) -> Path:
 def build(config: Config) -> dict:
     """Clean the source CSV, write the three splits, and return the manifest.
 
-    The A3 loader is always called with an explicit path: its module defaults resolve
+    The car-price-ml loader is always called with an explicit path: its module defaults resolve
     relative to the *installed* package, which lives in site-packages here.
     """
     if not config.paths.raw_csv.exists():
