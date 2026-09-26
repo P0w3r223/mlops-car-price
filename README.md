@@ -174,47 +174,9 @@ calibrated detector matched the fixed one exactly (0.05σ mileage: 4% both; 0.1�
 2% unseen makes: 3% both; 5%: 100% both). It removes the false alarms and detects the same
 real shifts — full tables in [`reports/detector_evaluation.md`](reports/detector_evaluation.md).
 
-## Why the textbook PSI threshold does not work
+Why a fixed PSI cutoff raises false alarms on large samples: [docs/psi-threshold.md](docs/psi-threshold.md).
 
-The first monitoring run flagged drift on the **control snapshot** — a week with nothing
-changed. The culprit is the received wisdom that PSI above 0.2 means drift:
-
-| Feature | Categories | PSI on an unshifted week | PSI from noise alone (99th pct) |
-|---|---:|---:|---:|
-| age | numeric | 0.002 | 0.009 |
-| fuel | 6 | 0.000 | 0.006 |
-| mark | ~30 | 0.013 | 0.017 |
-| **model** | **~200** | **0.140** | **0.169** |
-
-PSI is an effect size, but its null distribution still depends on sample size and category
-count. For `age` the 0.2 threshold sits 22× above the noise; for `model` the noise alone eats
-0.169 of it. Shrink the sample and it breaks outright: 200 categories drawn at 500 rows score
-**PSI 0.36 against their own source**.
-
-So a column is flagged only when it clears **both** the configured threshold ("is this worth
-acting on?") and its own measured noise floor ("is this more than the column does by itself?"),
-where the floor comes from resampling the reference at the snapshot's size
-([ADR 0006](docs/decisions/0006-calibrated-drift-thresholds.md)). p-values are reported for
-every column and gate nothing — at these sample sizes they measure n, not drift.
-
-## The bug this project found in its own foundation
-
-Two runs of the same model, same seed, same rows, kept disagreeing:
-
-```
-RandomForest, random_state=42: 8841.2 PLN, then 8914.1 PLN
-LightGBM,     random_state=42: 9331.0 / 9266.7 / 9278.2 PLN
-```
-
-The estimators were seeded; the **preprocessing was not**. car-price-ml's target encoder shuffled its
-internal cross-fitting folds from an unseeded RNG, so identical data produced different
-encodings. A ~70 PLN spread is nothing next to a 9 000 PLN MAE — and everything next to a
-100 PLN promotion margin. The gate would have been reading noise part of the time.
-
-Fixed upstream in [car-price-ml#3](https://github.com/P0w3r223/car-price-ml/pull/3)
-(v0.1.1), not worked around here ([ADR 0004](docs/decisions/0004-reproducibility-fixed-upstream.md)).
-Runs now reproduce to the decimal. The dataset hash changed with the pin, which is exactly
-what a data version should do when the code that cleans the data changes.
+A seeded training run that was not reproducible, and why it was fixed in car-price-ml rather than here: [docs/upstream-reproducibility-bug.md](docs/upstream-reproducibility-bug.md), [ADR 0004](docs/decisions/0004-reproducibility-fixed-upstream.md).
 
 ## How a model reaches production
 
